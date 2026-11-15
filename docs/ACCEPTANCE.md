@@ -21,7 +21,7 @@ without an APK SHA-256, tool versions, device/API/ABI and retained evidence.
 2. Java syntax parser: syntax only, not compilation or Android API verification.
 3. CI `android-library`: assembles/lints only the original `hdr-kit` source. A
    workflow definition is not evidence that a run passed; inspect the actual run.
-4. Optional CI `shader-matrix`: the kit's shader compile/atlas/intensity tests on
+4. CI `shader-matrix`: the kit's shader compile/atlas/intensity tests on
    API 23/29/33/35. It does not install or test Blackmagic Camera, Camera2 capture,
    encoder output, still output, audio or the full renderer lifecycle.
 5. `smoke-test`: installs the supplied, separately verified APK on an explicit

@@ -29,12 +29,15 @@ The CI workflow does this for the **original library**, never for a downloaded
 or user-provided Blackmagic binary. Consult the actual check conclusion/logs.
 It does not produce a Blackmagic Camera Mahdi application.
 
-## Optional original-library GPU matrix
+## Original-library GPU matrix
 
-Run the workflow manually with `shader_matrix=true` once the workflow is
-available for workflow_dispatch in the repository. GitHub requires a workflow
-on the default branch to expose manual dispatch. This working branch can still
-run its normal push/PR source and Android build checks before any merge.
+Pushes and pull requests run the original-library shader matrix after source
+and Android build checks pass. This allows this working branch to exercise the
+matrix without changing the default branch. Manual workflow_dispatch runs can
+opt in with `shader_matrix=true`; exposing the UI requires the workflow on the
+default branch, and API dispatch requires Actions-write permission (which the
+current repository connection does not grant). No additional credentials are
+needed for the normal source push checks.
 
 The GPU matrix provisions API 23/x86, API 29/x86_64, API 33/x86_64 and
 API 35/x86_64 Google API emulator images with software rendering/KVM. Tests:

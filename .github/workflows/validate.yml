@@ -71,7 +71,8 @@ jobs:
           if-no-files-found: ignore
 
   shader-matrix:
-    if: github.event_name == 'workflow_dispatch' && inputs.shader_matrix
+    # Push/PR checks need only repository-write access; manual dispatch needs Actions-write.
+    if: github.event_name != 'workflow_dispatch' || inputs.shader_matrix
     needs: [python, android-library]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -101,7 +102,7 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: ${{ matrix.api }}
           arch: ${{ matrix.arch }}
@@ -109,7 +110,24 @@ jobs:
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: gradle --no-daemon :hdr-kit:connectedDebugAndroidTest
+          script: bash -o pipefail -c 'mkdir -p work; gradle --no-daemon :hdr-kit:connectedDebugAndroidTest 2>&1 | tee work/shader-tests.log'
+      - name: Annotate shader failure diagnostics
+        if: failure()
+        shell: python
+        run: |
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          log = Path("work/shader-tests.log")
+          parts = [log.read_text(errors="replace")[-12000:]] if log.exists() else []
+          for path in Path("hdr-kit/build/outputs/androidTest-results").rglob("*.xml"):
+              try:
+                  for failure in ET.parse(path).getroot().iter("failure"):
+                      parts.append(failure.get("message", "") + "\n" + (failure.text or ""))
+              except ET.ParseError:
+                  pass
+          text = "\n".join(parts)[-24000:] or "Emulator/tool setup failed before instrumented tests; inspect the failing action."
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print("::error title=HDR kit shader diagnostics::" + text)
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
