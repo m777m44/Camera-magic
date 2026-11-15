@@ -61,8 +61,11 @@ jobs:
           from pathlib import Path
           path = Path("work/android-validation.log")
           text = path.read_text(errors="replace")[-20000:] if path.exists() else "Build did not start; inspect the failing tool-setup step."
-          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print("::error title=HDR kit validation diagnostics::" + text)
+          # GitHub truncates an individual annotation at 4096 characters.
+          text = text[-12000:]
+          for index in range(0, len(text), 3000):
+              chunk = text[index:index + 3000].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=HDR kit build diagnostics {index // 3000 + 1}::" + chunk)
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
@@ -126,8 +129,11 @@ jobs:
               except ET.ParseError:
                   pass
           text = "\n".join(parts)[-24000:] or "Emulator/tool setup failed before instrumented tests; inspect the failing action."
-          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print("::error title=HDR kit shader diagnostics::" + text)
+          # Keep the useful error tail visible through the Checks API as well as run logs.
+          text = text[-12000:]
+          for index in range(0, len(text), 3000):
+              chunk = text[index:index + 3000].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=HDR kit shader diagnostics {index // 3000 + 1}::" + chunk)
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
