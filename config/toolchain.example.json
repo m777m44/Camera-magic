@@ -1,0 +1,9 @@
+{
+  "java": "java",
+  "keytool": "keytool",
+  "apktool_jar": "/absolute/path/to/apktool.jar",
+  "jadx": "/absolute/path/to/jadx/bin/jadx",
+  "sdk_root": "/absolute/path/to/Android/Sdk",
+  "build_tools": "35.0.0",
+  "adb": "/absolute/path/to/Android/Sdk/platform-tools/adb"
+}
