@@ -27,7 +27,10 @@ https://github.com/m777m44/Camera-magic/releases/latest/download/Mahdi_Camera.ap
 https://github.com/m777m44/Camera-magic/releases/download/preview/Mahdi_Camera-preview.apk
 ```
 
-بناء **debug** من `main`، يُنشأ تلقائيًا بعد كل تشغيل ناجح للاختبارات على API 23 و35:
+بناء **debug** من `main`، يُنشأ تلقائيًا بعد كل تشغيل ناجح لخطوة البناء والاختبارات
+(ترجمة + 47 اختبار وحدة + Lint) — منشور فعليًا الآن في
+[إصدار `preview`](https://github.com/m777m44/Camera-magic/releases/tag/preview)
+(146 كيلوبايت، شهادة debug، تحقّقت منها خطوة `apksigner verify`):
 
 - إنه ليس الإصدار الموقّع، وشهادته شهادة debug.
 - لا يمكن تحديثه بإصدار موقّع (الشهادتان مختلفتان)، فاحذفه قبل تثبيت الإصدار الرسمي.
