@@ -264,7 +264,8 @@ final class GlPipeline {
             } finally {
                 atlas.recycle();
             }
-        } catch (java.io.IOException | RuntimeException error) {
+        } catch (java.io.IOException | com.mahdi.camera.lut.CubeLut.LutException
+                 | RuntimeException error) {
             Log.w(TAG, "Cannot grade a still with this look: " + error.getMessage());
             return null;
         }
