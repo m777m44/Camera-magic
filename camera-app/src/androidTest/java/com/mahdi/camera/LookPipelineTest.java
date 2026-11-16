@@ -101,6 +101,7 @@ public class LookPipelineTest {
     @Test public void photoIsSavedWhileALookIsApplied() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         Bitmap photo = null;
+        AtomicReference<String> lookState = new AtomicReference<>("");
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             AtomicReference<CameraEngine> reference = new AtomicReference<>();
             scenario.onActivity(activity -> reference.set(activity.cameraForTest()));
@@ -136,7 +137,6 @@ public class LookPipelineTest {
 
             AtomicReference<Uri> saved = new AtomicReference<>();
             AtomicReference<String> failure = new AtomicReference<>();
-            AtomicReference<String> lookState = new AtomicReference<>("");
             scenario.onActivity(MainActivity::photoForTest);
             long deadline = SystemClock.elapsedRealtime() + 20000;
             while (SystemClock.elapsedRealtime() < deadline && saved.get() == null
