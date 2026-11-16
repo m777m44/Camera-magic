@@ -469,6 +469,9 @@ public final class MainActivity extends Activity
             lens.setText(caps.front ? "FRONT LENS" : "REAR LENS");
             resolution.setText(caps.videoSize.getHeight() + "p · " + caps.fps + "fps");
         }
+        for (Button button : new Button[]{iso, shutter, whiteBalance, focus, ev, microphone, lens, resolution, clips}) {
+            button.setAlpha(button.isEnabled() ? 1f : 0.38f);
+        }
     }
 
     @Override public void capabilities(CameraEngine.Capabilities capabilities) {

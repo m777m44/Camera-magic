@@ -92,7 +92,8 @@ public final class CameraEngine {
                     CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR)
                     && sensitivity != null && exposure != null;
             Float focus = info.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
-            maxFocus = focus == null ? 0 : focus;
+            maxFocus = focus == null || !contains(info.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES),
+                    CaptureRequest.CONTROL_AF_MODE_OFF) ? 0 : focus;
             Float zoom = info.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM);
             maxZoom = zoom == null ? 1 : Math.min(zoom, 8);
             Integer orientation = info.get(CameraCharacteristics.SENSOR_ORIENTATION);
