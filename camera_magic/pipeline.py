@@ -114,9 +114,9 @@ def build(decoded: Path, output: Path, tools: Tools) -> dict:
     if missing_exported(root):
         raise MagicError("Exported-policy review is required before rebuilding.")
     tools.check_apktool()
-    aapt2 = tools.sdk_tool("aapt2")
     with tempfile.TemporaryDirectory(prefix=".mahdi-build-", dir=output.parent) as stage:
         apk = Path(stage) / "unsigned.apk"
+        aapt2 = tools.apktool_aapt2(Path(stage) / "aapt-tool")
         result = run(
             tools.apktool()
             + [
@@ -160,9 +160,12 @@ def badging(apk: Path, tools: Tools) -> dict:
 
     return {
         "application_id": match(r"^package: name='([^']+)'"),
-        "min_sdk": match(r"^sdkVersion:'([^']+)'"),
+        "version_code": match(r"^package: .*\bversionCode='([^']*)'"),
+        "version_name": match(r"^package: .*\bversionName='([^']*)'"),
+        # Newer aapt2 prints minSdkVersion; older Build-Tools used sdkVersion.
+        "min_sdk": match(r"^(?:minSdkVersion|sdkVersion):'([^']+)'"),
         "target_sdk": match(r"^targetSdkVersion:'([^']+)'"),
-        "label": match(r"^application-label:'([^']*)'"),
+        "label": match(r"^application-label:'(.*)'\s*$"),
         "launchable_activity": match(r"^launchable-activity: name='([^']+)'"),
         "permissions": re.findall(
             r"^uses-permission(?:-sdk-23)?: name='([^']+)'", output, re.MULTILINE

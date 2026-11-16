@@ -37,6 +37,9 @@ class DummyTools:
     def sdk_tool(self, name):
         return name
 
+    def apktool_aapt2(self, directory):
+        return "aapt2"
+
 
 class PipelineTests(unittest.TestCase):
     def setUp(self):
@@ -184,8 +187,17 @@ class PipelineTests(unittest.TestCase):
     def test_badging_preserves_original_launch_class(self, mocked):
         mocked.side_effect = self.fake_verify_run
         info = badging(self.apk, self.tools)
+        self.assertEqual("1", info["version_code"])
         self.assertEqual("com.vendor.camera.MainActivity", info["launchable_activity"])
         self.assertIn("android.permission.CAMERA", info["permissions"])
+
+    @patch("camera_magic.pipeline.run")
+    def test_badging_accepts_modern_and_legacy_min_sdk_spelling(self, mocked):
+        for field in ("sdkVersion", "minSdkVersion"):
+            text = BADGING.replace("sdkVersion:", field + ":")
+            mocked.return_value = subprocess.CompletedProcess([], 0, text, "")
+            with self.subTest(field=field):
+                self.assertEqual("23", badging(self.apk, self.tools)["min_sdk"])
 
     def test_changed_yaml_after_patch_is_rejected(self):
         import yaml

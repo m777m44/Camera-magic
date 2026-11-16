@@ -51,9 +51,20 @@ jobs:
           mkdir -p work
           {
             java -version
-            sdkmanager "platforms;android-35" "build-tools;35.0.0"
+            sdkmanager "platforms;android-35" "build-tools;35.0.0" "build-tools;36.0.0"
             gradle --no-daemon :hdr-kit:assembleDebug :hdr-kit:assembleDebugAndroidTest :hdr-kit:lintDebug
           } 2>&1 | tee work/android-validation.log
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Real name-only APK round trip with our own fixture
+        shell: bash
+        run: |
+          {
+            python -m pip install 'PyYAML==6.0.3'
+            python -m camera_magic.release_ci fetch-tool
+            APKTOOL_JAR="$GITHUB_WORKSPACE/.cache/apktool.jar" python scripts/check_name_only_integration.py
+          } 2>&1 | tee -a work/android-validation.log
       - name: Annotate build failure diagnostics
         if: failure()
         shell: python

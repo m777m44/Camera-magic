@@ -128,6 +128,19 @@ class Tools:
             raise MagicError(f"Missing SDK tool: {tool}")
         return str(tool)
 
+    def apktool_aapt2(self, directory: Path) -> str:
+        """Give Apktool an owned executable; it chmods --aapt even when already executable."""
+        source = Path(self.sdk_tool("aapt2"))
+        directory.mkdir(parents=True, exist_ok=False)
+        target = directory / source.name
+        shutil.copyfile(source, target)
+        target.chmod(0o700)
+        # Preserve relative loader dependencies on SDK distributions that supply them.
+        libraries = source.parent / "lib64"
+        if libraries.is_dir():
+            shutil.copytree(libraries, directory / "lib64")
+        return str(target.resolve())
+
     def doctor(self) -> dict:
         result = {"required": {}, "optional": {}}
         probes = {

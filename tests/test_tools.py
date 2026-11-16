@@ -46,6 +46,25 @@ class ToolTests(unittest.TestCase):
         with self.assertRaises(MagicError):
             tools.sdk_tool("missing")
 
+    def test_apktool_uses_owned_aapt2_copy_not_system_sdk(self):
+        sdk = self.sdk("36.0.0")
+        binary = sdk / "aapt2"
+        binary.write_bytes(b"fixture executable, not a real tool")
+        binary.chmod(0o555)
+        (sdk / "lib64").mkdir()
+        (sdk / "lib64/libfixture.so").write_bytes(b"fixture loader dependency")
+        output = self.root / "work/aapt-tool"
+        target = Path(self.tools().apktool_aapt2(output))
+        self.assertEqual(binary.read_bytes(), target.read_bytes())
+        self.assertEqual(0o700, target.stat().st_mode & 0o777)
+        self.assertEqual(0o555, binary.stat().st_mode & 0o777)
+        self.assertEqual(
+            (sdk / "lib64/libfixture.so").read_bytes(),
+            (output / "lib64/libfixture.so").read_bytes(),
+        )
+        with self.assertRaises(FileExistsError):
+            self.tools().apktool_aapt2(output)
+
     @patch("camera_magic.tools.run")
     def test_java_minimum(self, run):
         run.return_value = subprocess.CompletedProcess([], 0, "", 'openjdk version "17.0.13"')

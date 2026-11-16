@@ -12,6 +12,7 @@ from .core import MagicError, inventory, write_json
 from .device import smoke_test
 from .lut import generate
 from .manifest import DEFAULT_ID, DEFAULT_LABEL, audit_tree, patch_tree
+from .name_only import ASSET_NAME, rename_apk
 from .pipeline import build, create_key, decode, sign, verify
 from .tools import Tools
 
@@ -90,7 +91,16 @@ def parser() -> argparse.ArgumentParser:
     signing.add_argument("--alias", default="mahdi")
     signing.add_argument("--application-id", default=DEFAULT_ID)
     signing.add_argument("--label", default=DEFAULT_LABEL)
-    for command in (keygen, signing):
+    rename = commands.add_parser(
+        "rename-apk",
+        help="Change display labels only; preserve package, SDK, icons and executable/asset bytes",
+    )
+    rename.add_argument("apk", type=Path)
+    rename.add_argument("--output", type=Path, default=Path("artifacts") / ASSET_NAME)
+    rename.add_argument("--label", default=DEFAULT_LABEL)
+    rename.add_argument("--keystore", type=Path, default=Path("keys/mahdi-release.jks"))
+    rename.add_argument("--alias", default="mahdi")
+    for command in (keygen, signing, rename):
         command.add_argument(
             "--store-pass-env",
             default="MAHDI_STORE_PASSWORD",
@@ -182,6 +192,17 @@ def main(argv: list[str] | None = None) -> int:
                 expected_label=args.label,
                 min_sdk=args.min_sdk,
                 target_sdk=args.target_sdk,
+            )
+        elif args.command == "rename-apk":
+            result = rename_apk(
+                args.apk,
+                args.output,
+                args.keystore,
+                args.alias,
+                tools,
+                label=args.label,
+                store_env=args.store_pass_env,
+                key_env=args.key_pass_env,
             )
         elif args.command == "verify":
             result = verify(
