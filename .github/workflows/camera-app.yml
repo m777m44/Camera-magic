@@ -48,6 +48,7 @@ jobs:
             gradle --no-daemon :camera-app:assembleDebug :camera-app:assembleRelease \
               :camera-app:assembleDebugAndroidTest :camera-app:testDebugUnitTest \
               :camera-app:lintDebug :camera-app:lintRelease
+            python scripts/check_app_release_integration.py
           } 2>&1 | tee work/camera-build.log
       - name: Annotate application build failure
         if: failure()
