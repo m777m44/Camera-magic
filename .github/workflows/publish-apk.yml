@@ -1,0 +1,104 @@
+name: Publish name-only APK
+
+on:
+  workflow_run:
+    workflows: ["Source and HDR kit validation"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# No privileged pull_request/pull_request_target trigger and no untrusted artifacts.
+permissions:
+  contents: read
+
+concurrency:
+  group: camera-magic-apk-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      vars.APK_RELEASE_ENABLED == 'true' &&
+      ((github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository) ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      SOURCE_COMMIT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m unittest discover -q
+      - uses: actions/setup-java@v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4.0.4
+      - run: sdkmanager "build-tools;36.0.0"
+      - name: Fetch checksum-pinned Apktool
+        run: python -m camera_magic.release_ci fetch-tool
+      - name: Fetch authorized, checksum-pinned original APK
+        env:
+          APK_SOURCE_URL: ${{ secrets.APK_SOURCE_URL }}
+          APK_SOURCE_SHA256: ${{ vars.APK_SOURCE_SHA256 }}
+        run: python -m camera_magic.release_ci prepare-source
+      - name: Restore persistent private signing key
+        env:
+          APK_KEYSTORE_B64: ${{ secrets.APK_KEYSTORE_B64 }}
+          MAHDI_STORE_PASSWORD: ${{ secrets.APK_KEYSTORE_PASSWORD }}
+          MAHDI_KEY_PASSWORD: ${{ secrets.APK_KEY_PASSWORD }}
+        run: python -m camera_magic.release_ci prepare-key
+      - name: Rename only, sign, and verify preservation
+        env:
+          APKTOOL_JAR: ${{ github.workspace }}/.cache/apktool.jar
+          MAHDI_STORE_PASSWORD: ${{ secrets.APK_KEYSTORE_PASSWORD }}
+          MAHDI_KEY_PASSWORD: ${{ secrets.APK_KEY_PASSWORD }}
+          APK_KEY_ALIAS: ${{ vars.APK_KEY_ALIAS || 'mahdi' }}
+        run: |
+          python -m camera_magic rename-apk inputs/source.apk \
+            --keystore work/keys/release.jks --alias "$APK_KEY_ALIAS" \
+            --output artifacts/Blackmagic_Camera_Mahdi.apk
+          python -m camera_magic.release_ci prepare-notes
+      - name: Publish complete release atomically as Latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_main=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)
+          if [[ "$latest_main" != "$SOURCE_COMMIT" ]]; then
+            echo 'A newer main commit exists; this stale build was not published.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          tag="apk-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # Draft first: the existing Latest remains downloadable if any upload fails.
+          gh release create "$tag" --repo "$GH_REPO" --target "$SOURCE_COMMIT" --draft \
+            --title "Blackmagic Camera Mahdi · build ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" \
+            --notes-file artifacts/release-notes.md \
+            artifacts/Blackmagic_Camera_Mahdi.apk \
+            artifacts/Blackmagic_Camera_Mahdi.verification.json artifacts/SHA256SUMS.txt
+          latest_main=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)
+          if [[ "$latest_main" != "$SOURCE_COMMIT" ]]; then
+            echo 'Main advanced during upload; the stale release was left as a draft.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh release edit "$tag" --repo "$GH_REPO" --draft=false --latest
+          echo "Download latest successful APK: https://github.com/$GH_REPO/releases/latest/download/Blackmagic_Camera_Mahdi.apk" >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove transient original and private key
+        if: always()
+        shell: python
+        run: |
+          from pathlib import Path
+          for name in ("inputs/source.apk", "work/keys/release.jks"):
+              Path(name).unlink(missing_ok=True)

@@ -160,9 +160,11 @@ def badging(apk: Path, tools: Tools) -> dict:
 
     return {
         "application_id": match(r"^package: name='([^']+)'"),
+        "version_code": match(r"^package: .*\bversionCode='([^']*)'"),
+        "version_name": match(r"^package: .*\bversionName='([^']*)'"),
         "min_sdk": match(r"^sdkVersion:'([^']+)'"),
         "target_sdk": match(r"^targetSdkVersion:'([^']+)'"),
-        "label": match(r"^application-label:'([^']*)'"),
+        "label": match(r"^application-label:'(.*)'\s*$"),
         "launchable_activity": match(r"^launchable-activity: name='([^']+)'"),
         "permissions": re.findall(
             r"^uses-permission(?:-sdk-23)?: name='([^']+)'", output, re.MULTILINE

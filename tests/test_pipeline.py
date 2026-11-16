@@ -184,6 +184,7 @@ class PipelineTests(unittest.TestCase):
     def test_badging_preserves_original_launch_class(self, mocked):
         mocked.side_effect = self.fake_verify_run
         info = badging(self.apk, self.tools)
+        self.assertEqual("1", info["version_code"])
         self.assertEqual("com.vendor.camera.MainActivity", info["launchable_activity"])
         self.assertIn("android.permission.CAMERA", info["permissions"])
 
