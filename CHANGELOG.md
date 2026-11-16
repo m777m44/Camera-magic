@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — signing key creation without a JDK, sturdier emulator job
+
+- **`scripts/create_release_key.py`** creates the release signing key in pure Python: a real
+  JKS v2 keystore with one RSA 3072-bit key pair, the JKS `KeyProtector` encryption
+  (SHA-1 password digest + AES keystream), a self-signed 10,000-day certificate and the
+  public pin for `config/mahdi-camera-signing.json`. `keytool` is not needed.
+  Nine tests read the file back field by field and prove the key pair matches the
+  certificate, the store digest verifies, the password is required (12+ characters), an
+  existing key is never overwritten, and the password never appears in output.
+- **The certificate pin is now the real key's.** The previous value in
+  `config/mahdi-camera-signing.json` described no key that existed in the repository, so any
+  signed build would have been rejected by the publisher's own check.
+- **The emulator job distinguishes infrastructure from bugs.** It checks the emulator is
+  alive before running, retries once when the system image crashes, and does *not* retry a
+  run that reported tests and failed them — so a real regression stays red.
+
 ## Unreleased — installable preview download
 
 - **Preview build channel.** `Preview APK download` (`preview-apk.yml`) builds the debug

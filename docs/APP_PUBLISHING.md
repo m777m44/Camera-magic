@@ -40,6 +40,31 @@ https://github.com/m777m44/Camera-magic/releases/latest/download/Mahdi_Camera.ap
 لا تُعد كتابة تاريخ main أو تنقص versionCode. يستعمل البناء والتوقيع والنشر نفس SHA
 وعدد commits؛ رقم إصدار toolkit Python منفصل عن رقم التطبيق.
 
+## إنشاء مفتاح التوقيع (بدون JDK)
+
+إذا لم يكن `keytool` متاحًا، يُنشئ `scripts/create_release_key.py` نفس الملفات التي
+يُنشئها: مخزن **JKS** بصيغة إصدار 2، مفتاح RSA بطول 3072 بت، شهادة X.509 موقّعة ذاتيًا
+صالحـة 10,000 يوم، وملف `keys/mahdi-camera-private.json` بكلمات المرور بصلاحية 600.
+
+```bash
+# كلمة السر تُقرأ من البيئة، لا من سطر الأوامر (سطر الأوامر مرئي في قائمة العمليات)
+export MAHDI_STORE_PASSWORD='<كلمة سر من 12 حرفًا على الأقل>'
+python3 scripts/create_release_key.py --keystore keys/mahdi-camera-release.jks
+```
+
+المخرجات: اسم المفتاح، بصمة الشهادة SHA-256، وتاريخ الانتهاء. انسخ البصمة إلى
+`config/mahdi-camera-signing.json`؛ فبدونها يرفض الناشر توقيع الحزمة (فحص مقصود: لا نشر
+بشهادة غير مثبتة).
+
+**حد أدنى 12 حرفًا.** `release_ci.prepare_key` يرفض أي كلمة أقصر من ذلك، والكلمات القصيرة
+تفشل أيضًا داخل `keytool` برسالة غير واضحة. استخدم عبارة طويلة (16 حرفًا أو أكثر) ولا
+تُدوَّن الكلمة في أي ملف داخل Git.
+
+**النسخ الاحتياطي إلزامي.** انسخ `keys/mahdi-camera-release.jks` و
+`keys/mahdi-camera-private.json` إلى مكان خاص خارج Git. فقدان أي منهما يعني أن أي تحديث
+لاحق سيُرفض على الأجهزة التي ثبّتت الشهادة الحالية، لأن Android يرفض تغيير مفتاح التوقيع.
+المجلد `keys/` مستثنى في `.gitignore` ولا يُرفع أبدًا.
+
 ## تفعيل النشر الآلي بالكامل
 
 على المالك إعداد Repository Secrets التالية من Settings → Secrets and variables → Actions:
