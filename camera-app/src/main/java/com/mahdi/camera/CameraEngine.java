@@ -230,6 +230,7 @@ public final class CameraEngine {
             if (ids.length == 0) throw new IOException("No cameras were reported by Android.");
             List<Lens> lenses = new ArrayList<>();
             String preferred = ids[0];
+            boolean rearSelected = false;
             for (String id : ids) {
                 CameraCharacteristics c = manager.getCameraCharacteristics(id);
                 Integer facing = c.get(CameraCharacteristics.LENS_FACING);
