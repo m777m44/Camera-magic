@@ -272,8 +272,9 @@ class AppReleaseTests(unittest.TestCase):
         self.assertIn("head_repository.full_name == github.repository", condition)
         # Look at the actual gh commands: comments and notes may name the release link, but
         # no upload may claim the Latest slot or publish under the release asset name.
-        commands = [line.strip() for line in text.splitlines()
-                    if line.strip().startswith("gh release")]
+        commands = [
+            line.strip() for line in text.splitlines() if line.strip().startswith("gh release")
+        ]
         self.assertTrue(commands, "the workflow must publish something")
         for command in commands:
             with self.subTest(command=command):
