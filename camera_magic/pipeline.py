@@ -162,7 +162,8 @@ def badging(apk: Path, tools: Tools) -> dict:
         "application_id": match(r"^package: name='([^']+)'"),
         "version_code": match(r"^package: .*\bversionCode='([^']*)'"),
         "version_name": match(r"^package: .*\bversionName='([^']*)'"),
-        "min_sdk": match(r"^sdkVersion:'([^']+)'"),
+        # Newer aapt2 prints minSdkVersion; older Build-Tools used sdkVersion.
+        "min_sdk": match(r"^(?:minSdkVersion|sdkVersion):'([^']+)'"),
         "target_sdk": match(r"^targetSdkVersion:'([^']+)'"),
         "label": match(r"^application-label:'(.*)'\s*$"),
         "launchable_activity": match(r"^launchable-activity: name='([^']+)'"),

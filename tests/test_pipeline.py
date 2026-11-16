@@ -188,6 +188,14 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual("com.vendor.camera.MainActivity", info["launchable_activity"])
         self.assertIn("android.permission.CAMERA", info["permissions"])
 
+    @patch("camera_magic.pipeline.run")
+    def test_badging_accepts_modern_and_legacy_min_sdk_spelling(self, mocked):
+        for field in ("sdkVersion", "minSdkVersion"):
+            text = BADGING.replace("sdkVersion:", field + ":")
+            mocked.return_value = subprocess.CompletedProcess([], 0, text, "")
+            with self.subTest(field=field):
+                self.assertEqual("23", badging(self.apk, self.tools)["min_sdk"])
+
     def test_changed_yaml_after_patch_is_rejected(self):
         import yaml
         from tests.helpers import decoded_fixture
