@@ -150,7 +150,9 @@ public final class CubeLut {
                 throw new LutException("1D LUTs are not supported; export a 3D .cube");
             }
             if (upper.startsWith("LUT_3D_INPUT_RANGE")) {
-                float[] range = parseTriple(line.substring(17).trim(), "LUT_3D_INPUT_RANGE");
+                // "LUT_3D_INPUT_RANGE" is 18 characters; a wrong offset eats the first digit.
+                float[] range = parseTriple(line.substring("LUT_3D_INPUT_RANGE".length()).trim(),
+                        "LUT_3D_INPUT_RANGE");
                 minValue = range[0];
                 maxValue = range[1];
                 if (!(maxValue > minValue)) throw new LutException("Invalid input range");
@@ -168,6 +170,12 @@ public final class CubeLut {
                 if (size == -1) throw new LutException("Colour data before LUT_3D_SIZE");
                 if (count >= red.length) throw new LutException("Too many colour entries");
                 float[] rgb = parseTriple(line, "colour entry");
+                for (float channel : rgb) {
+                    if (Float.isNaN(channel) || Float.isInfinite(channel)) {
+                        throw new LutException("Colour entry " + (count + 1)
+                                + " is not a finite number");
+                    }
+                }
                 red[count] = rgb[0];
                 green[count] = rgb[1];
                 blue[count] = rgb[2];
@@ -181,9 +189,14 @@ public final class CubeLut {
         if (!sawData || count != red.length) {
             throw new LutException("Expected " + red.length + " entries, found " + count);
         }
-        if (!(domainMax[0] > domainMin[0]) || !(domainMax[1] > domainMin[1])
-                || !(domainMax[2] > domainMin[2])) {
-            throw new LutException("Invalid DOMAIN_MIN/DOMAIN_MAX");
+        for (int channel = 0; channel < 3; channel++) {
+            if (!(domainMax[channel] > domainMin[channel])) {
+                throw new LutException("Invalid DOMAIN_MIN/DOMAIN_MAX: max must exceed min");
+            }
+            if (Math.abs(domainMin[channel]) > 4f || Math.abs(domainMax[channel]) > 4f) {
+                // A LUT domain outside -4..4 is almost certainly a log/scale mix-up.
+                throw new LutException("Unsupported DOMAIN range; export a display-referred LUT");
+            }
         }
         int[] argb = new int[red.length];
         for (int index = 0; index < argb.length; index++) {

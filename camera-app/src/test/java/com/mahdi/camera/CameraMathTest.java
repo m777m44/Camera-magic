@@ -51,10 +51,29 @@ public class CameraMathTest {
         assertArrayEquals(CameraMath.identity(), CameraMath.inputTransform(90, 90, false), 1e-6f);
     }
 
-    @Test public void quarterTurnKeepsTheOriginAtTheOrigin() {
+    /**
+     * A 90-degree rear-camera case must stay a pure rotation of the sampled rectangle: the
+     * transformed quad has to cover exactly the same area, or the preview would be shifted
+     * and show a letterbox strip.
+     */
+    @Test public void quarterTurnIsAPureRotationOfTheSampledRectangle() {
         float[] matrix = CameraMath.inputTransform(90, 0, false);
+        float minX = Float.MAX_VALUE, maxX = -Float.MAX_VALUE;
+        float minY = Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
+        for (float[] corner : new float[][]{{0, 0}, {1, 0}, {0, 1}, {1, 1}}) {
+            float[] mapped = CameraMath.apply(matrix, corner[0], corner[1]);
+            minX = Math.min(minX, mapped[0]);
+            maxX = Math.max(maxX, mapped[0]);
+            minY = Math.min(minY, mapped[1]);
+            maxY = Math.max(maxY, mapped[1]);
+        }
+        assertEquals(0f, minX, 1e-5f);
+        assertEquals(1f, maxX, 1e-5f);
+        assertEquals(0f, minY, 1e-5f);
+        assertEquals(1f, maxY, 1e-5f);
+        // The sensor's top-left corner ends up top-right on screen after a 90-degree turn.
         float[] origin = CameraMath.apply(matrix, 0f, 0f);
-        assertEquals(0f, origin[0], 1e-5f);
+        assertEquals(1f, origin[0], 1e-5f);
         assertEquals(0f, origin[1], 1e-5f);
     }
 
