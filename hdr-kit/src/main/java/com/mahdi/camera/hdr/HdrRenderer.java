@@ -396,7 +396,9 @@ public final class HdrRenderer implements AutoCloseable {
 
     private void initializeEgl() {
         display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
-        if (display == EGL14.EGL_NO_DISPLAY || !EGL14.eglInitialize(display, null, 0, null, 0)) {
+        // API-23 EGL14 JNI bindings reject null version arrays, even though newer ones accept them.
+        int[] eglVersion = new int[2];
+        if (display == EGL14.EGL_NO_DISPLAY || !EGL14.eglInitialize(display, eglVersion, 0, eglVersion, 1)) {
             throw new IllegalStateException("EGL display unavailable");
         }
         int[] attributes = {EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,

@@ -11,6 +11,8 @@
 - Added unit tests, a source-only Android build/shader-test CI workflow and
   device smoke-test tooling for API 23, 29, 33 and 35.
 - Excluded third-party APKs, decompiled application code and signing keys from Git.
+- Fixed API-23 EGL14 initialization rejecting null version arrays, discovered by
+  actual emulator shader tests; added a renderer construction/cleanup regression test.
 
 No Blackmagic APK has been supplied, modified, built, signed, integrated with the
 HDR library, or run on an emulator/device for this baseline. An SDK declaration

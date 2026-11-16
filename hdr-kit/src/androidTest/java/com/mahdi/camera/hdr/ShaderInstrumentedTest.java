@@ -36,7 +36,8 @@ public class ShaderInstrumentedTest {
     public void createContext() {
         assets = InstrumentationRegistry.getInstrumentation().getTargetContext().getAssets();
         display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
-        assertTrue(EGL14.eglInitialize(display, null, 0, null, 0));
+        int[] eglVersion = new int[2]; // API-23 EGL14 rejects null major/minor arrays.
+        assertTrue(EGL14.eglInitialize(display, eglVersion, 0, eglVersion, 1));
         EGLConfig[] configs = new EGLConfig[1];
         int[] count = new int[1];
         assertTrue(EGL14.eglChooseConfig(display, new int[]{

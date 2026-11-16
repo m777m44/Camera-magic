@@ -151,7 +151,10 @@ and evidence, not a filename change to this baseline.
 
 The Android instrumented tests compile/link all shaders, decode all ten atlases,
 and draw a constant test pixel at intensity 0/0.5/1 against a CPU color reference.
-They do not test this entire Camera2/SurfaceTexture/EGL-window/MediaCodec lifecycle,
+A separate GL-thread test constructs the real renderer, uploads every preset,
+checks the input Surface and empty-frame readback guard, then closes it. API-23
+EGL14 JNI bindings require non-null major/minor version arrays during initialization.
+These tests do not exercise the entire Camera2/SurfaceTexture/EGL-window/MediaCodec lifecycle,
 spatial-kernel behavior on real scenes, still encoding, audio or Blackmagic hooks.
 The Python tests check generation/layout/manifest policy/command ordering using
 synthetic fixtures. Follow [ACCEPTANCE.md](ACCEPTANCE.md) for real release tests.

@@ -46,6 +46,12 @@ API 35/x86_64 Google API emulator images with software rendering/KVM. Tests:
 - Decode all ten LUT PNGs and verify dimensions.
 - Draw one constant RGB test pixel; compare zero/full/half intensity with the
   CPU grading reference, allowing 8-bit quantization and 16^3 interpolation.
+- Construct/close the real renderer on its GL HandlerThread, upload all presets,
+  verify its input Surface and reject readback before any camera frame exists.
+
+An API-23 run exposed `IllegalArgumentException: major == null` in EGL14's JNI
+binding. Both the renderer and shader-test setup now pass explicit version
+arrays, with the four-API matrix retained as a regression check.
 
 No Blackmagic binary, camera session, physical sensor, saved JPEG, audio or
 encoded recording is exercised by these tests. Shader compile success does
