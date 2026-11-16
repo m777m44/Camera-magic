@@ -194,6 +194,12 @@ public final class CameraEngine {
             java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     private boolean shuttingDown;
     private boolean holdsCameraLease;
+    /**
+     * True once a look session has actually configured. A HAL that rejects the preferred
+     * stream combination must not be retried: the fallback rebuilds the same rejected
+     * layout, which turned into a tight rejection loop that never showed a preview.
+     */
+    private boolean lookSessionSeen;
     private long leaseDeadline;
     private int previewRetries;
 
@@ -433,12 +439,19 @@ public final class CameraEngine {
     /** Shared rejection handling for a capture session that could not be created. */
     private void sessionRejected(boolean look, String message) {
         if (look) {
-            Log.w(TAG, "Look session unavailable; falling back to the plain preview");
+            Log.w(TAG, "Look session unavailable; falling back to the plain preview"
+                    + (lookSessionSeen ? " (retrying once)" : " (not retryable)"));
             lookRendering = false;
             if (gl != null) gl.setPreviewSurface(null, 0, 0);
             main.post(() -> listener.lookActive(false,
                     "The look pipeline was rejected by the camera; preview is unfiltered."));
-            if (active && camera != null) createPreview();
+            if (!active || camera == null || texture == null || !texture.isAvailable()) return;
+            // A HAL that already served a look session gets one more attempt, because a
+            // transient teardown can reject it once. A HAL that never accepted the extra
+            // surface opens the plain preview instead, so this can never become a loop.
+            if (lookSessionSeen) lookSessionSeen = false;
+            lookRendering = false;
+            createPreview();
         } else {
             fail("Preview configuration failed. Try another lens or resolution.");
         }
@@ -495,6 +508,12 @@ public final class CameraEngine {
      */
     private boolean buildLookPlane(Size previewSize) {
         if (gl == null || gl.failed()) return false;
+        // An emulated GPU cannot create an EGL window surface at all (error 12291). Asking
+        // for a look session there only costs the user a rejected session and a fallback.
+        if (!gl.canPresent()) {
+            Log.w(TAG, "GPU cannot present frames; using the plain preview");
+            return false;
+        }
         // open() is asynchronous on the GL thread; it publishes the state it reached.
         gl.open(previewSize.getWidth(), previewSize.getHeight());
         Surface input = gl.cameraInput();
@@ -515,6 +534,7 @@ public final class CameraEngine {
                 session = configured;
                 try {
                     repeat(false); previewReady = true; lastError = ""; previewRetries = 0;
+                    if (look) lookSessionSeen = true;
                     watchFirstFrame();
                     Log.i(TAG, "Preview ready generation " + generation + (look ? " (look)" : " (plain)"));
                     main.post(() -> listener.ready(true));

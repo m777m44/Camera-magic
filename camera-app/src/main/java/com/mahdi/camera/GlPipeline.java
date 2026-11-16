@@ -80,6 +80,11 @@ final class GlPipeline {
                 + " frames=" + current.frameCount() + " first=" + current.hasFrame();
     }
 
+    /** True when a renderer is ready and has not reported a fatal GL error. */
+    boolean canPresent() {
+        return isUsable();
+    }
+
     /** True once at least one graded frame has been rendered. Safe from any thread. */
     boolean hasFrame() {
         LutRenderer current = renderer;
