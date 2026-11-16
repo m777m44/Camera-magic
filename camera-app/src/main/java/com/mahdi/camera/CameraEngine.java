@@ -4,6 +4,7 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
@@ -13,6 +14,7 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.hardware.ImageReader;
 import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
@@ -43,6 +45,10 @@ public final class CameraEngine {
         void recording(boolean recording);
         void saved(Uri uri);
         void error(String message);
+        /** A still photo finished saving, or failed with a message. Called on the main thread. */
+        void photo(Uri uri, String error);
+        /** The GPU look path is active (false after a fallback to the plain preview). */
+        void lookActive(boolean active, String reason);
     }
 
     static final class Lens {
@@ -147,6 +153,7 @@ public final class CameraEngine {
 
     private final Context context;
     private final Listener listener;
+    private final GlPipeline gl;
     private final Handler main = new Handler(android.os.Looper.getMainLooper());
     private final HandlerThread thread = new HandlerThread("MahdiCamera2");
     private final Handler worker;
@@ -161,6 +168,10 @@ public final class CameraEngine {
     private volatile int displayDegrees;
     private volatile boolean audioEnabled = true;
     private PreviewView texture;
+    /** Camera2 target that feeds the GPU look pipeline, or null when rendering directly. */
+    private Surface lookInputSurface;
+    private boolean lookRendering;
+    private ImageReader stillReader;
     private String selectedId;
     private Size requestedSize = new Size(1280, 720);
     private CameraDevice camera;
@@ -179,8 +190,9 @@ public final class CameraEngine {
     private boolean holdsCameraLease;
     private long leaseDeadline;
 
-    CameraEngine(Context context, Listener listener) {
+    CameraEngine(Context context, Listener listener, GlPipeline lookPipeline) {
         this.context = context.getApplicationContext(); this.listener = listener;
+        this.gl = lookPipeline;
         manager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
         thread.start(); worker = new Handler(thread.getLooper());
     }
@@ -344,6 +356,47 @@ public final class CameraEngine {
         return best;
     }
 
+    /**
+     * Some Camera2 implementations reject three concurrent outputs at preview size. Try the
+     * full set, then the fallback, then the absolute minimum; only report a failure once no
+     * combination is accepted. Never calls a callback with a null session.
+     */
+    private void configureSession(CameraCaptureSession.StateCallback callback,
+                                  List<Surface> preferred, List<Surface> fallback,
+                                  boolean look) {
+        List<List<Surface>> attempts = new ArrayList<>();
+        attempts.add(preferred);
+        if (fallback != null) attempts.add(fallback);
+        attempts.add(Collections.singletonList(preferred.get(0)));
+        RuntimeException last = null;
+        for (List<Surface> attempt : attempts) {
+            try {
+                camera.createCaptureSession(attempt, callback, worker);
+                return;
+            } catch (CameraAccessException | RuntimeException error) {
+                last = error;
+                Log.w(TAG, "Capture session rejected (" + attempt.size() + " surfaces): "
+                        + error.getMessage());
+            }
+        }
+        // Every combination failed: let the caller's normal rejection path run.
+        sessionRejected(look, last == null ? "Camera rejected every session layout." : String.valueOf(last.getMessage()));
+    }
+
+    /** Shared rejection handling for a capture session that could not be created. */
+    private void sessionRejected(boolean look, String message) {
+        if (look) {
+            Log.w(TAG, "Look session unavailable; falling back to the plain preview");
+            lookRendering = false;
+            if (gl != null) gl.setPreviewSurface(null, 0, 0);
+            main.post(() -> listener.lookActive(false,
+                    "The look pipeline was rejected by the camera; preview is unfiltered."));
+            if (active && camera != null) createPreview();
+        } else {
+            fail("Preview configuration failed. Try another lens or resolution.");
+        }
+    }
+
     private void createPreview() {
         if (!active || camera == null || texture == null || !texture.isAvailable()) return;
         try {
@@ -359,33 +412,88 @@ public final class CameraEngine {
                 if (sensor == 90 || sensor == 270) texture.setAspectRatio(size.getHeight(), size.getWidth());
                 else texture.setAspectRatio(size.getWidth(), size.getHeight());
             });
+
+            // The look pipeline renders at preview resolution: GPU cost does not grow with
+            // the recording resolution and the preview keeps the sensor aspect ratio.
+            lookRendering = buildLookPlane(size);
+            final Surface captureSurface = lookRendering ? lookInputSurface : previewSurface;
+            if (lookRendering) {
+                gl.setPreviewSurface(previewSurface, size.getWidth(), size.getHeight());
+                gl.setInputTransform(CameraMath.inputTransform(caps.sensorOrientation, displayDegrees,
+                        caps.front));
+            }
+
             final int serial = ++sessionSerial;
-            camera.createCaptureSession(Collections.singletonList(previewSurface),
-                    new CameraCaptureSession.StateCallback() {
-                        @Override public void onConfigured(CameraCaptureSession configured) {
-                            if (!active || camera == null || serial != sessionSerial) { configured.close(); return; }
-                            session = configured;
-                            try {
-                                repeat(false); previewReady = true; lastError = "";
-                                Log.i(TAG, "Preview ready generation " + generation);
-                                main.post(() -> listener.ready(true));
-                            } catch (CameraAccessException | RuntimeException e) {
-                                configured.close(); fail("Preview failed: " + e.getMessage());
-                            }
-                        }
-                        @Override public void onConfigureFailed(CameraCaptureSession configured) {
-                            configured.close();
-                            if (serial == sessionSerial) fail("Preview configuration failed. Try another lens or resolution.");
-                        }
-                    }, worker);
+            if (lookRendering) {
+                // Two targets keep the TextureView satisfied if the renderer ever misses a
+                // frame; the fallback is the renderer-only layout.
+                configureSession(sessionCallback(serial, captureSurface, true),
+                        Arrays.asList(previewSurface, captureSurface),
+                        Collections.singletonList(captureSurface), true);
+            } else {
+                // A TextureView that cannot skip frames deadlocks if Camera2 does not give
+                // it one per request, so the plain path keeps the preview as a target.
+                configureSession(sessionCallback(serial, captureSurface, false),
+                        Arrays.asList(previewSurface, captureSurface), null, false);
+            }
+            final boolean activeLook = lookRendering;
+            main.post(() -> listener.lookActive(activeLook, activeLook ? ""
+                    : "Live look rendering is unavailable on this device; recording is unfiltered."));
         } catch (CameraAccessException | RuntimeException e) { fail("Preview unavailable: " + e.getMessage()); }
+    }
+
+    /**
+     * Try to route frames through the GPU look pipeline.
+     *
+     * @return true when the renderer owns an input surface and can present the preview
+     */
+    private boolean buildLookPlane(Size previewSize) {
+        if (gl == null || gl.failed()) return false;
+        gl.open(previewSize.getWidth(), previewSize.getHeight());
+        Surface input = gl.cameraInput();
+        if (input == null) return false;
+        lookInputSurface = input;
+        return true;
+    }
+
+    private CameraCaptureSession.StateCallback sessionCallback(final int serial,
+                                                               final Surface captureSurface,
+                                                               final boolean look) {
+        return new CameraCaptureSession.StateCallback() {
+            @Override public void onConfigured(CameraCaptureSession configured) {
+                if (!active || camera == null || serial != sessionSerial) { configured.close(); return; }
+                session = configured;
+                try {
+                    repeat(false); previewReady = true; lastError = "";
+                    Log.i(TAG, "Preview ready generation " + generation + (look ? " (look)" : " (plain)"));
+                    main.post(() -> listener.ready(true));
+                } catch (CameraAccessException | RuntimeException e) {
+                    configured.close(); fail("Preview failed: " + e.getMessage());
+                }
+            }
+            @Override public void onConfigureFailed(CameraCaptureSession configured) {
+                configured.close();
+                if (serial != sessionSerial) return;
+                if (look) {
+                    // Never leave the user without a camera because a GPU path failed.
+                    Log.w(TAG, "Look session rejected; falling back to the plain preview");
+                    lookRendering = false;
+                    if (gl != null) gl.setPreviewSurface(null, 0, 0);
+                    main.post(() -> listener.lookActive(false,
+                            "The look pipeline was rejected by the camera; preview is unfiltered."));
+                    createPreview();
+                } else {
+                    fail("Preview configuration failed. Try another lens or resolution.");
+                }
+            }
+        };
     }
 
     private void repeat(boolean recording) throws CameraAccessException {
         if (camera == null || session == null || previewSurface == null) return;
         CaptureRequest.Builder request = camera.createCaptureRequest(
                 recording ? CameraDevice.TEMPLATE_RECORD : CameraDevice.TEMPLATE_PREVIEW);
-        request.addTarget(previewSurface);
+        request.addTarget(lookRendering ? lookInputSurface : previewSurface);
         if (recording && recordSurface != null) request.addTarget(recordSurface);
         request.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
         if (caps.fpsRange != null) request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, caps.fpsRange);
@@ -452,15 +560,23 @@ public final class CameraEngine {
                 recorder.setAudioSamplingRate(44100); recorder.setAudioChannels(1);
                 recorder.setAudioEncodingBitRate(128000);
             }
-            recorder.setOrientationHint(CameraMath.rotation(caps.sensorOrientation, displayDegrees, caps.front));
+            // The GPU path already draws upright frames; only the plain path needs a hint.
+            recorder.setOrientationHint(CameraMath.containerRotation(lookRendering,
+                    caps.sensorOrientation, displayDegrees, caps.front));
             recorder.setOnErrorListener((r, what, extra) -> worker.post(() -> {
                 stopRecordingInternal(true); fail("Recorder error " + what + ". Check storage space.");
             }));
             recorder.prepare();
             recordSurface = recorder.getSurface();
+            if (lookRendering) gl.setEncoderSurface(recordSurface, 0L);
             closeSession();
             final int serial = ++sessionSerial;
-            camera.createCaptureSession(Arrays.asList(previewSurface, recordSurface),
+            List<Surface> targets = lookRendering
+                    ? Arrays.asList(previewSurface, lookInputSurface, recordSurface)
+                    : Arrays.asList(previewSurface, recordSurface);
+            List<Surface> fallback = lookRendering
+                    ? Arrays.asList(lookInputSurface, recordSurface) : null;
+            configureSession(
                     new CameraCaptureSession.StateCallback() {
                         @Override public void onConfigured(CameraCaptureSession configured) {
                             if (!active || camera == null || serial != sessionSerial || recorder == null) {
@@ -478,11 +594,178 @@ public final class CameraEngine {
                             configured.close();
                             if (serial == sessionSerial) recordingFailed(new IOException("Video session rejected by camera."));
                         }
-                    }, worker);
+                    }, fallback, true);
         } catch (CameraAccessException | IOException | RuntimeException e) { recordingFailed(e); }
     }
 
     void stopRecording() { worker.post(() -> stopRecordingInternal(true)); }
+
+    /**
+     * Capture one JPEG. With the look pipeline active the graded frame is read back from
+     * the GPU, so the saved photo matches the preview exactly instead of being re-graded
+     * with CPU code; otherwise the sensor still is encoded as-is.
+     */
+    void takePhoto() {
+        worker.post(() -> {
+            if (busy || isRecording) { photoFailed("Finish the current recording first."); return; }
+            if (!active || !previewReady || camera == null || caps == null) {
+                photoFailed("Wait for the camera preview before taking a photo.");
+                return;
+            }
+            if (lookRendering && gl != null && gl.isUsable() && gl.hasFrame()) {
+                busy = true;
+                final Bitmap[] frame = new Bitmap[1];
+                Thread reader = new Thread(() -> {
+                    frame[0] = gl.captureFrame();
+                    worker.post(() -> saveCapturedFrame(frame[0]));
+                }, "MahdiStill");
+                reader.start();
+                return;
+            }
+            captureSensorStill();
+        });
+    }
+
+    private void saveCapturedFrame(Bitmap frame) {
+        busy = false;
+        if (frame == null) {
+            photoFailed("The look pipeline did not return a frame. Try again or turn the look off.");
+            return;
+        }
+        try {
+            Uri uri = PhotoStore.saveJpeg(context, frame, -1);
+            main.post(() -> listener.photo(uri, null));
+        } catch (IOException | RuntimeException error) {
+            photoFailed("Could not save the photo: " + error.getMessage());
+        } finally {
+            frame.recycle();
+        }
+    }
+
+    private void captureSensorStill() {
+        if (stillReader != null) { photoFailed("A photo is already being taken."); return; }
+        Size size = stillSize();
+        busy = true;
+        try {
+            stillReader = ImageReader.newInstance(size.getWidth(), size.getHeight(),
+                    android.graphics.ImageFormat.JPEG, 2);
+        } catch (RuntimeException error) {
+            busy = false;
+            photoFailed("This camera cannot take a JPEG still: " + error.getMessage());
+            return;
+        }
+        stillReader.setOnImageAvailableListener(reader -> {
+            android.media.Image image = null;
+            try {
+                image = reader.acquireNextImage();
+                if (image == null) return;
+                java.nio.ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+                byte[] jpeg = new byte[buffer.remaining()];
+                buffer.get(jpeg);
+                image.close();
+                image = null;
+                busy = false;
+                Uri uri = PhotoStore.saveJpegBytes(context, jpeg);
+                closeStillReader();
+                if (active && camera != null) createPreview();
+                main.post(() -> listener.photo(uri, null));
+            } catch (IOException | RuntimeException error) {
+                photoFailed("Could not save the photo: " + error.getMessage());
+            } finally {
+                if (image != null) image.close();
+            }
+        }, worker);
+        try {
+            closeSession();
+            final int serial = ++sessionSerial;
+            List<Surface> targets = new ArrayList<>();
+            targets.add(lookRendering ? lookInputSurface : previewSurface);
+            if (lookRendering) targets.add(previewSurface);
+            targets.add(stillReader.getSurface());
+            configureSession(new CameraCaptureSession.StateCallback() {
+                @Override public void onConfigured(CameraCaptureSession configured) {
+                    if (!active || camera == null || serial != sessionSerial) { configured.close(); return; }
+                    session = configured;
+                    try {
+                        repeat(false);
+                        CaptureRequest.Builder request = camera.createCaptureRequest(
+                                CameraDevice.TEMPLATE_STILL_CAPTURE);
+                        request.addTarget(stillReader.getSurface());
+                        request.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
+                        request.set(CaptureRequest.JPEG_ORIENTATION,
+                                CameraMath.rotation(caps.sensorOrientation, displayDegrees, caps.front));
+                        request.set(CaptureRequest.JPEG_QUALITY, (byte) 95);
+                        configured.capture(request.build(), new CameraCaptureSession.CaptureCallback() {
+                            @Override public void onCaptureFailed(CameraCaptureSession failed,
+                                                                  CaptureRequest failedRequest,
+                                                                  android.hardware.camera2.CaptureFailure failure) {
+                                photoFailed("The camera rejected the still capture.");
+                            }
+                        }, worker);
+                    } catch (CameraAccessException | RuntimeException error) {
+                        busy = false;
+                        photoFailed("Still capture failed: " + error.getMessage());
+                        closeStillReader();
+                        if (active && camera != null) createPreview();
+                    }
+                }
+                @Override public void onConfigureFailed(CameraCaptureSession configured) {
+                    configured.close();
+                    if (serial != sessionSerial) return;
+                    busy = false;
+                    photoFailed("This camera cannot combine the preview with a JPEG still.");
+                    closeStillReader();
+                    if (active && camera != null) createPreview();
+                }
+            }, Arrays.asList(stillReader.getSurface()), false);
+        } catch (CameraAccessException | RuntimeException error) {
+            busy = false;
+            photoFailed("Still capture failed: " + error.getMessage());
+            closeStillReader();
+            if (active && camera != null) createPreview();
+        }
+    }
+
+    private void photoFailed(String message) {
+        busy = false;
+        closeStillReader();
+        if (active && camera != null && session == null) createPreview();
+        main.post(() -> listener.photo(null, message));
+    }
+
+    /** Close the JPEG reader only; rebuilding the preview is the caller's decision. */
+    private void closeStillReader() {
+        if (stillReader != null) {
+            stillReader.close();
+            stillReader = null;
+        }
+    }
+
+    private Size stillSize() {
+        StreamConfigurationMap map = caps.info.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+        Size[] sizes = map == null ? null : map.getOutputSizes(android.graphics.ImageFormat.JPEG);
+        Size best = null;
+        if (sizes != null) {
+            for (Size size : sizes) {
+                if (!CameraMath.validPhotoSize(size.getWidth(), size.getHeight())) continue;
+                long pixels = (long) size.getWidth() * size.getHeight();
+                // Stay at or below 12 MP: larger buffers are slow and can exhaust RAM.
+                if (pixels > 12_000_000L) continue;
+                if (best == null || pixels > (long) best.getWidth() * best.getHeight()) best = size;
+            }
+            if (best == null) {
+                for (Size size : sizes) {
+                    if (CameraMath.validPhotoSize(size.getWidth(), size.getHeight())
+                            && (best == null || (long) size.getWidth() * size.getHeight()
+                            < (long) best.getWidth() * best.getHeight())) best = size;
+                }
+            }
+        }
+        if (best == null) throw new IllegalStateException("No JPEG output size reported");
+        return best;
+    }
+
+    private long lastFrameNanos() { return gl == null ? 0L : gl.lastFrameNanos(); }
 
     private void recordingFailed(Exception e) {
         closeSession(); releaseRecorder();
@@ -497,6 +780,12 @@ public final class CameraEngine {
         if (!isRecording && !busy) return;
         boolean success = isRecording;
         closeSession();
+        if (lookRendering && gl != null) {
+            // Repeat the final frame so MediaCodec sees monotonic timestamps, then detach
+            // before MediaRecorder.stop() drains the surface on API 29+.
+            gl.setEncoderSurface(null, lastFrameNanos());
+            gl.flushEncoderDetach();
+        }
         if (isRecording && recorder != null) {
             try { recorder.stop(); }
             catch (RuntimeException e) { success = false; fail("Clip was too short or could not be finalized. It was discarded."); }

@@ -27,6 +27,8 @@ APP_ID = "com.mahdi.camera"
 APP_LABEL = "Mahdi Camera"
 ASSET = "Mahdi_Camera.apk"
 VALIDATION = "Mahdi Camera app validation"
+# Deliberately no INTERNET permission. The camera stays offline; the opt-in updater is a
+# separate component that is not part of this APK yet (see docs/UPDATER.md).
 PERMISSIONS = {
     "android.permission.CAMERA",
     "android.permission.RECORD_AUDIO",

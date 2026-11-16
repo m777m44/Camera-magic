@@ -15,6 +15,7 @@ android {
         versionName = "1.0.$appBuildNumber"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    sourceSets.getByName("main").assets.srcDir("src/main/assets")
     buildTypes {
         release {
             isMinifyEnabled = false

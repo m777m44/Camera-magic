@@ -222,6 +222,18 @@ class AppReleaseTests(unittest.TestCase):
         self.assertEqual("28", legacy.get(android + "maxSdkVersion"))
         self.assertIsNone(root.find("./application/service"))
 
+    def test_look_assets_are_packaged_and_the_apk_stays_offline(self):
+        assets = ROOT / "camera-app/src/main/assets/mahdi_lut"
+        self.assertTrue((assets / "presets.json").is_file())
+        self.assertTrue(list((assets / "luts").glob("*.png")))
+        for shader in ("fullscreen.vert", "external.frag", "lut.frag", "copy.frag"):
+            self.assertTrue((assets / "shaders" / shader).is_file(), shader)
+        manifest = (ROOT / "camera-app/src/main/AndroidManifest.xml").read_text()
+        # An in-app updater would need INTERNET; the camera APK must not gain it silently.
+        self.assertNotIn("android.permission.INTERNET", manifest)
+        gradle = (ROOT / "camera-app/build.gradle.kts").read_text()
+        self.assertIn('assets.srcDir("src/main/assets")', gradle)
+
     def test_workflow_does_not_publish_unvalidated_or_unsigned_artifacts(self):
         text = (ROOT / ".github/workflows/publish-mahdi.yml").read_text()
         data = yaml.load(text, Loader=yaml.BaseLoader)

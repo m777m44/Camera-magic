@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "generator": "python -m camera_magic app-luts",
+  "color_space": "SDR display-referred RGB; not Log, PQ or HLG",
+  "lut_size": 16,
+  "tiles": 4,
+  "cube_order": "red fastest, then green, then blue",
+  "atlas_layout": "size tiles per row, one tile per blue slice",
+  "strength_range": [
+    0.0,
+    1.0
+  ],
+  "presets": [
+    {
+      "id": "neutral",
+      "name": "Neutral",
+      "exposure": 0.0,
+      "contrast": 1.0,
+      "saturation": 1.0,
+      "shadows": 0.0,
+      "highlights": 0.0,
+      "warmth": 0.0
+    },
+    {
+      "id": "natural",
+      "name": "Natural",
+      "exposure": 0.0,
+      "contrast": 1.04,
+      "saturation": 1.03,
+      "shadows": 0.18,
+      "highlights": 0.15,
+      "warmth": 0.0
+    },
+    {
+      "id": "punch",
+      "name": "Punch",
+      "exposure": 0.04,
+      "contrast": 1.18,
+      "saturation": 1.22,
+      "shadows": 0.12,
+      "highlights": 0.2,
+      "warmth": 0.02
+    },
+    {
+      "id": "cinema",
+      "name": "Cinema",
+      "exposure": -0.08,
+      "contrast": 1.12,
+      "saturation": 0.86,
+      "shadows": 0.14,
+      "highlights": 0.3,
+      "warmth": 0.08
+    },
+    {
+      "id": "soft",
+      "name": "Soft light",
+      "exposure": 0.02,
+      "contrast": 0.92,
+      "saturation": 0.98,
+      "shadows": 0.35,
+      "highlights": 0.45,
+      "warmth": 0.0
+    },
+    {
+      "id": "noir",
+      "name": "Noir",
+      "exposure": -0.04,
+      "contrast": 1.22,
+      "saturation": 0.0,
+      "shadows": 0.1,
+      "highlights": 0.22,
+      "warmth": 0.0
+    }
+  ],
+  "warning": "Original display-referred looks. They do not add sensor dynamic range, do not recover clipped highlights, and are not a substitute for RAW."
+}
