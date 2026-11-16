@@ -89,7 +89,11 @@ final class GlPipeline {
                 return;
             }
             try {
-                renderer = new LutRenderer(context, outputWidth, outputHeight, this::onRenderError);
+                LutRenderer created = new LutRenderer(context, outputWidth, outputHeight,
+                        this::onRenderError);
+                // Publish the renderer only after a successful construction, and mark the
+                // pipeline ready before the camera may ask for its input surface.
+                renderer = created;
                 state.width = outputWidth;
                 state.height = outputHeight;
                 state.ready = true;
@@ -107,10 +111,13 @@ final class GlPipeline {
         });
     }
 
-    /** Input surface for Camera2, or null when the renderer is not usable. */
+    /**
+     * Input surface for Camera2, or null when the renderer is not ready. Never returns a
+     * surface that no one will draw into: Camera2 would create a session that never paints.
+     */
     Surface cameraInput() {
         LutRenderer current = renderer;
-        return current == null ? null : current.getCameraInputSurface();
+        return current == null || !state.ready ? null : current.getCameraInputSurface();
     }
 
     void setPreviewSurface(final Surface surface, final int width, final int height) {

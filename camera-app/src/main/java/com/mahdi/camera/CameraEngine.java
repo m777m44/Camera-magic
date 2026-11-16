@@ -415,6 +415,8 @@ public final class CameraEngine {
             // The look pipeline renders at preview resolution: GPU cost does not grow with
             // the recording resolution and the preview keeps the sensor aspect ratio.
             lookRendering = buildLookPlane(size);
+            main.post(() -> listener.lookActive(lookRendering, lookRendering ? ""
+                    : "Live look rendering is unavailable on this device; recording is unfiltered."));
             final Surface captureSurface = lookRendering ? lookInputSurface : previewSurface;
             if (lookRendering) {
                 gl.setPreviewSurface(previewSurface, size.getWidth(), size.getHeight());
@@ -430,14 +432,11 @@ public final class CameraEngine {
                         Arrays.asList(previewSurface, captureSurface),
                         Collections.singletonList(captureSurface), true);
             } else {
-                // A TextureView that cannot skip frames deadlocks if Camera2 does not give
-                // it one per request, so the plain path keeps the preview as a target.
+                // The plain path has a single output, so it must not be listed twice: a
+                // TextureView cannot skip frames and always consumes that one stream.
                 configureSession(sessionCallback(serial, captureSurface, false),
-                        Arrays.asList(previewSurface, captureSurface), null, false);
+                        Collections.singletonList(captureSurface), null, false);
             }
-            final boolean activeLook = lookRendering;
-            main.post(() -> listener.lookActive(activeLook, activeLook ? ""
-                    : "Live look rendering is unavailable on this device; recording is unfiltered."));
         } catch (RuntimeException e) { fail("Preview unavailable: " + e.getMessage()); }
     }
 
@@ -448,9 +447,13 @@ public final class CameraEngine {
      */
     private boolean buildLookPlane(Size previewSize) {
         if (gl == null || gl.failed()) return false;
+        // open() is asynchronous on the GL thread; it publishes the state it reached.
         gl.open(previewSize.getWidth(), previewSize.getHeight());
         Surface input = gl.cameraInput();
-        if (input == null) return false;
+        if (input == null) {
+            Log.w(TAG, "Look pipeline is not ready yet; using the plain preview");
+            return false;
+        }
         lookInputSurface = input;
         return true;
     }
