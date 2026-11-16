@@ -1,0 +1,139 @@
+name: Mahdi Camera app validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mahdi-camera-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Validate release policies and Java syntax
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m unittest discover -q
+          ruff check camera_magic tests scripts
+          ruff format --check camera_magic tests scripts
+          python scripts/check_java_syntax.py
+      - uses: actions/setup-java@v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4.0.4
+      - uses: gradle/actions/setup-gradle@v6.4.1
+        with:
+          gradle-version: '8.11.1'
+      - name: Compile, unit test, and lint the independent application
+        shell: bash
+        run: |
+          mkdir -p work
+          export MAHDI_VERSION_CODE=$(git rev-list --count HEAD)
+          {
+            sdkmanager "platforms;android-35" "build-tools;36.0.0"
+            gradle --no-daemon :camera-app:assembleDebug :camera-app:assembleRelease \
+              :camera-app:assembleDebugAndroidTest :camera-app:testDebugUnitTest \
+              :camera-app:lintDebug :camera-app:lintRelease
+            python scripts/check_app_release_integration.py
+          } 2>&1 | tee work/camera-build.log
+      - name: Annotate application build failure
+        if: failure()
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("work/camera-build.log")
+          text = p.read_text(errors="replace")[-12000:] if p.exists() else "Tool setup failed before application compilation."
+          for i in range(0, len(text), 3000):
+              chunk = text[i:i+3000].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Mahdi Camera build {i//3000+1}::{chunk}")
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: mahdi-camera-build-and-unit-tests
+          path: |
+            camera-app/build/outputs/apk/
+            camera-app/build/reports/
+            work/camera-build.log
+          if-no-files-found: ignore
+
+  camera-device:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 23
+            arch: x86
+          - api: 35
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v6.4.1
+        with:
+          gradle-version: '8.11.1'
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          arch: ${{ matrix.arch }}
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -noaudio -camera-back emulated -camera-front emulated
+          script: bash scripts/run_camera_integration.sh
+      - name: Annotate camera or recording failure
+        if: failure()
+        shell: python
+        run: |
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          log = Path("work/camera-device.log")
+          parts = [log.read_text(errors="replace")[-5000:]] if log.exists() else []
+          for p in Path("camera-app/build/outputs/androidTest-results").rglob("*.xml"):
+              try:
+                  for f in ET.parse(p).getroot().iter("failure"):
+                      parts.append(f.get("message", "") + "\n" + (f.text or ""))
+              except ET.ParseError:
+                  pass
+          crash = Path("work/camera-logcat.txt")
+          if crash.exists():
+              parts.append(crash.read_text(errors="replace")[-7000:])
+          text = "\n".join(parts)[-18000:] or "Emulator setup failed before camera tests."
+          for i in range(0, len(text), 3000):
+              chunk = text[i:i+3000].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Mahdi Camera device {i//3000+1}::{chunk}")
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: mahdi-camera-real-emulator-api-${{ matrix.api }}
+          path: |
+            camera-app/build/reports/androidTests/
+            camera-app/build/outputs/androidTest-results/
+            work/camera-*.log
+            work/camera-logcat.txt
+            work/test-evidence/
+          if-no-files-found: ignore

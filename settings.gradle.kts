@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "CameraMagicHdrKit"
-include(":hdr-kit")
+rootProject.name = "CameraMagic"
+include(":hdr-kit", ":camera-app")

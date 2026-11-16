@@ -158,6 +158,20 @@ def badging(apk: Path, tools: Tools) -> dict:
         found = re.search(pattern, output, re.MULTILINE)
         return found[1] if found else None
 
+    def permissions(kind: str) -> list[dict]:
+        details = []
+        for name, attributes in re.findall(
+            rf"^{kind}(?:-sdk-23)?: name='([^']+)'([^\n]*)", output, re.MULTILINE
+        ):
+            cap = re.search(r"\bmaxSdkVersion='([^']*)'", attributes)
+            item = {"name": name, "max_sdk": cap[1] if cap else None}
+            if kind == "uses-implied-permission":
+                reason = re.search(r"\breason='([^']*)'", attributes)
+                item["reason"] = reason[1] if reason else None
+            details.append(item)
+        return details
+
+    declared = permissions("uses-permission")
     return {
         "application_id": match(r"^package: name='([^']+)'"),
         "version_code": match(r"^package: .*\bversionCode='([^']*)'"),
@@ -167,9 +181,9 @@ def badging(apk: Path, tools: Tools) -> dict:
         "target_sdk": match(r"^targetSdkVersion:'([^']+)'"),
         "label": match(r"^application-label:'(.*)'\s*$"),
         "launchable_activity": match(r"^launchable-activity: name='([^']+)'"),
-        "permissions": re.findall(
-            r"^uses-permission(?:-sdk-23)?: name='([^']+)'", output, re.MULTILINE
-        ),
+        "permissions": [item["name"] for item in declared],
+        "permission_details": declared,
+        "implied_permissions": permissions("uses-implied-permission"),
     }
 
 

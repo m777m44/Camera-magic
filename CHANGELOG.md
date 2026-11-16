@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0 — Independent Mahdi Camera application
+
+- With the owner's explicit approval, change the deliverable from a name-only vendor
+  APK to an independent original Camera2 Android app (`com.mahdi.camera`, Mahdi Camera).
+  No Blackmagic code, artwork, APK, cloud service or affiliation is included.
+- Add real preview, lens/resolution selection up to 1080p, H.264 MP4/AAC recording,
+  optional microphone, MediaStore/legacy gallery saving, and last-clip playback.
+- Add hardware-gated manual ISO/shutter/focus, white-balance presets, exposure
+  compensation, digital zoom and screen-only composition guides.
+- Close the camera and finalize recording on pause; discard failed/too-short output.
+  No Internet permission, analytics, background capture or broad media-read permission.
+- Add Java calculation tests, build/Lint, and real emulator recording/decoding and
+  lifecycle tests on API 23 and 35. These are not physical-phone quality tests.
+- Add persistent-certificate-pinned release automation and a secure optional local
+  signing handoff containing only the public APK, never a private key/password.
+  Rebuild validated main and compare all non-signature content before publication.
+- Use the new independent asset name `Mahdi_Camera.apk`; keep legacy name-only tools
+  and the separate HDR reference library without silently integrating their filters.
+
+Full unattended releases require owner-configured MAHDI_APP_* signing secrets.
+If permissions prevent setup, local signing can publish a genuine release with
+that same private key; automation does not silently rotate certificates or use debug keys.
+
 ## 0.2.0 — Name-only APK and opt-in releases
 
 - Added `rename-apk`: preserves the original application ID, icons, SDK and app

@@ -6,7 +6,9 @@ import sys
 import javalang
 
 root = Path(__file__).resolve().parents[1]
-files = sorted((root / "hdr-kit/src").rglob("*.java"))
+files = sorted(
+    path for module in ("hdr-kit", "camera-app") for path in (root / module / "src").rglob("*.java")
+)
 for path in files:
     try:
         javalang.parse.parse(path.read_text(encoding="utf-8"))
