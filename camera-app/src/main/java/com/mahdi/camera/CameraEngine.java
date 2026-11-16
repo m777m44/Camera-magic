@@ -383,6 +383,24 @@ public final class CameraEngine {
         sessionRejected(look, last == null ? "Camera rejected every session layout." : last);
     }
 
+    /**
+     * A renderer-backed session that never receives a frame would show a black preview.
+     * After a short grace period, give up on the look and go back to the plain path so the
+     * user always has a working camera, and say why.
+     */
+    private void watchFirstFrame() {
+        if (!lookRendering || gl == null) return;
+        worker.postDelayed(() -> {
+            if (!active || !lookRendering || gl == null || gl.hasFrame()) return;
+            Log.w(TAG, "Look pipeline received no frames; restoring the plain preview");
+            lookRendering = false;
+            gl.setPreviewSurface(null, 0, 0);
+            main.post(() -> listener.lookActive(false,
+                    "This device did not deliver frames to the look pipeline; the preview is unfiltered."));
+            createPreview();
+        }, 2500);
+    }
+
     /** Shared rejection handling for a capture session that could not be created. */
     private void sessionRejected(boolean look, String message) {
         if (look) {
@@ -468,6 +486,7 @@ public final class CameraEngine {
                 session = configured;
                 try {
                     repeat(false); previewReady = true; lastError = ""; previewRetries = 0;
+                    watchFirstFrame();
                     Log.i(TAG, "Preview ready generation " + generation + (look ? " (look)" : " (plain)"));
                     main.post(() -> listener.ready(true));
                 } catch (CameraAccessException | RuntimeException e) {

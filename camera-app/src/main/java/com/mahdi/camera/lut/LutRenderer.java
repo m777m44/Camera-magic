@@ -139,6 +139,9 @@ public final class LutRenderer implements AutoCloseable {
             externalTexture = name[0];
             configureTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, externalTexture);
             cameraTexture = new SurfaceTexture(externalTexture);
+            // Without an explicit buffer size the producer has no geometry to fill and the
+            // camera delivers no frames at all (observed on emulator HALs).
+            cameraTexture.setDefaultBufferSize(width, height);
             cameraInput = new Surface(cameraTexture);
             cameraTexture.setOnFrameAvailableListener(ignored -> onFrame(), handler);
             checkGl("initialize");
