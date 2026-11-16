@@ -26,7 +26,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 
 /** Camera2 + MediaRecorder. Preview and recording use the same capture controls. */
@@ -110,7 +109,9 @@ public final class CameraEngine {
                 }
             }
             if (candidates.isEmpty()) throw new IOException("No supported video size at or below 1080p.");
-            Collections.sort(candidates, Comparator.comparingLong(s -> (long) s.getWidth() * s.getHeight()));
+            Collections.sort(candidates, (first, second) -> Long.compare(
+                    (long) first.getWidth() * first.getHeight(),
+                    (long) second.getWidth() * second.getHeight()));
             sizes = Collections.unmodifiableList(candidates);
             Size best = sizes.get(0);
             for (Size size : sizes) {
