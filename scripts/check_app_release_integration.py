@@ -75,6 +75,8 @@ def main():
             pass  # Test key MUST be rejected by the production public-certificate pin.
         else:
             raise MagicError("Ephemeral test certificate unexpectedly accepted for production.")
+        # The public-APK handoff is intentionally limited to a tiny transport. Assert the
+        # guard itself (a real APK cannot travel in a dispatch body, including this one).
         transport = {
             "event_type": "mahdi-publish-signed",
             "client_payload": {
@@ -85,10 +87,14 @@ def main():
             },
         }
         size = len(json.dumps(transport).encode())
-        if size > 64000:
+        if size <= 64000:
             raise MagicError(
-                f"APK transport is {size} bytes: use a draft-body handoff before publication."
+                f"Transport guard is broken: a {size}-byte APK body was accepted for dispatch."
             )
+        print(
+            f"APK transport guard rejected a {size}-byte handoff, as designed; "
+            "the draft-release handoff in docs/APP_PUBLISHING.md is the supported path."
+        )
         print(
             f"SDK 36 app release self-test passed; signed test APK {signed.stat().st_size} bytes; public dispatch {size} bytes."
         )

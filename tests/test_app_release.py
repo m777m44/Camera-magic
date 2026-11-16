@@ -234,6 +234,14 @@ class AppReleaseTests(unittest.TestCase):
         gradle = (ROOT / "camera-app/build.gradle.kts").read_text()
         self.assertIn('assets.srcDir("src/main/assets")', gradle)
 
+    def test_release_notes_describe_the_look_pipeline_and_no_updater(self):
+        source = (ROOT / "camera_magic/app_release.py").read_text()
+        self.assertIn("LOOK applies a 3D colour cube", source)
+        self.assertIn("There is no in-app updater", source)
+        # The old release copy must not keep claiming there is no LUT support at all.
+        self.assertNotIn("No HDR/ProRes/LUT/Blackmagic Cloud equivalence", source)
+        self.assertIn("SHA256SUMS.txt does not list", source)
+
     def test_workflow_does_not_publish_unvalidated_or_unsigned_artifacts(self):
         text = (ROOT / ".github/workflows/publish-mahdi.yml").read_text()
         data = yaml.load(text, Loader=yaml.BaseLoader)
