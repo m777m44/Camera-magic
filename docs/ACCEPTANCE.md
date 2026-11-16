@@ -1,5 +1,11 @@
 # Acceptance / release gate
 
+> **The independent `camera-app` is a separate deliverable from the patcher described
+> below.** Its measured results are in the section "Measured: independent `camera-app`"
+> at the end of this file. The rows below still describe the (unfinished) patcher. Never
+> promote a patcher row to `passed` from a `camera-app` emulator run: they are different
+> artefacts.
+
 This file is a checklist, not a test report. No Blackmagic application APK was
 provided to create this baseline. Do not replace `not_tested` with `passed`
 without an APK SHA-256, tool versions, device/API/ABI and retained evidence.
@@ -69,3 +75,27 @@ Keep `doctor.json`, input/output SHA-256, source version/provenance, review note
 `patch.json`, build log, certificate fingerprint, verification JSON and one fresh
 smoke report per device. Remove personal paths, serial numbers, captured media
 and logcat secrets before sharing. Never publish the keystore or its passwords.
+
+## Measured: independent `camera-app`
+
+Evidence: workflow `Mahdi Camera app validation` run
+[43907626417](https://github.com/m777m44/Camera-magic/actions/runs/43907626417) on commit
+`f0dfeec`, both emulator jobs green (API 35 x86_64 and API 23 x86, `google_apis`,
+`-gpu swiftshader_indirect`, emulated back/front cameras).
+
+| Criterion | Emulator result | What is still unproven |
+|---|---|---|
+| Installs and launches on API 23 | `passed` (instrumented suite runs in-process) | ABI-matched physical Android 6 device |
+| Installs and launches on API 35 | `passed` | Physical Android 15 device |
+| Camera preview opens, closes and reopens | `passed`: pause/resume ×3, Activity recreation ×3, recording then restore | Vendor HAL quirks (Xiaomi/Huawei/Samsung/Pixel) |
+| ≥5 looks bundled and selectable | `passed`: 6 looks decode on device, each also yields a gradable CPU cube | — |
+| Look reaches the saved still | `passed`: the saved JPEG is measurably desaturated versus an unfiltered capture of the same scene | GPU-graded preview, because emulated GLES cannot create an EGL window surface here |
+| `.cube` import | `parsed on device` (`CubeLut.parse` + atlas allocation for a 9³ cube) | Large 33³/65³ cubes on a real device |
+| H.264 + AAC recorded and decodable | `passed`: MediaExtractor finds an `avc` video track and an `mp4a-latm` audio track, samples decode, duration > 1 s | Real sensor quality, 4K, 10-bit |
+| Manual ISO/shutter/WB/focus, histogram, peaking | **not tested** | Requires a device with manual Camera2 support |
+| RAW/DNG, HDR+, super-resolution, night mode, dual video | **not implemented** | — |
+| Signed release APK v1–v4, permanent download link | **not done**: no release published yet | Needs the keystore and a published release |
+
+The emulator proves lifecycle, permissions, capture, encoding and the colour pipeline's
+plumbing. It cannot prove image quality, colour accuracy, thermal behaviour or vendor
+compatibility; those stay `not_tested` until a physical device run is recorded.

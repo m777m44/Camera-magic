@@ -29,6 +29,7 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m unittest discover -v
       - run: python -m camera_magic generate-luts --check
+      - run: python -m camera_magic app-luts --check
       - run: ruff check camera_magic tests scripts && ruff format --check camera_magic tests scripts
       - run: python scripts/check_java_syntax.py
 

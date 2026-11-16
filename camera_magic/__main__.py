@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 from . import __version__
+from .app_lut import generate_app_luts
 from .core import MagicError, inventory, write_json
 from .device import smoke_test
 from .lut import generate
@@ -122,6 +123,11 @@ def parser() -> argparse.ArgumentParser:
         "generate-luts", help="Regenerate/check ten original LUTs without Android tools"
     )
     luts.add_argument("--check", action="store_true")
+    app_luts = commands.add_parser(
+        "app-luts", help="Regenerate/check the LUT assets bundled inside the camera app"
+    )
+    app_luts.add_argument("--check", action="store_true")
+    app_luts.add_argument("--root", type=Path, default=REPO)
     smoke = commands.add_parser(
         "smoke-test", help="Install and launch on one explicit adb device; not an HDR test"
     )
@@ -216,6 +222,8 @@ def main(argv: list[str] | None = None) -> int:
             write_json(args.report, result)
         elif args.command == "generate-luts":
             result = generate(args.hdr_assets, check=args.check)
+        elif args.command == "app-luts":
+            result = generate_app_luts(args.root, check=args.check)
         else:
             result = smoke_test(
                 args.apk,

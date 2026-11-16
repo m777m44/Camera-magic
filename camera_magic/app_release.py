@@ -27,6 +27,8 @@ APP_ID = "com.mahdi.camera"
 APP_LABEL = "Mahdi Camera"
 ASSET = "Mahdi_Camera.apk"
 VALIDATION = "Mahdi Camera app validation"
+# Deliberately no INTERNET permission. The camera stays offline; the opt-in updater is a
+# separate component that is not part of this APK yet (see docs/UPDATER.md).
 PERMISSIONS = {
     "android.permission.CAMERA",
     "android.permission.RECORD_AUDIO",
@@ -288,18 +290,25 @@ def save_release_files(directory: Path, report: dict) -> None:
     (directory / "SHA256SUMS.txt").write_text(
         "".join(f"{sha256(path)}  {path.name}\n" for path in files), encoding="utf-8"
     )
+    # The permanent download URL and any future updater rely on this exact asset name.
+    if f"  {ASSET}\n" not in (directory / "SHA256SUMS.txt").read_text(encoding="utf-8"):
+        raise MagicError(f"SHA256SUMS.txt does not list {ASSET}.")
     (directory / "release-notes.md").write_text(
         "# Mahdi Camera — independent, open-source, offline\n\n"
         "An original Camera2 application, NOT Blackmagic Camera, not a renamed vendor APK and not affiliated "
         "with Blackmagic Design. No vendor code, artwork or cloud services are included. Source is MIT licensed.\n\n"
         "Features: live camera preview, available lens/resolution selection (up to 1080p), H.264 MP4 with "
-        "optional AAC microphone audio, device-supported manual ISO/shutter/focus, white-balance presets, "
-        "exposure compensation, digital zoom and screen-only composition guides. Videos save to DCIM/MahdiCamera. "
-        "No Internet permission, account, ads or analytics.\n\n"
+        "optional AAC microphone audio, JPEG stills, device-supported manual ISO/shutter/focus, white-balance "
+        "presets, exposure compensation, digital zoom and screen-only composition guides. "
+        "LOOK applies a 3D colour cube (bundled looks plus your own .cube/.png LUTs) on the GPU to the preview, "
+        "the recording and the photo together, with an adjustable strength. These are display-referred SDR looks: "
+        "no sensor HDR, 10-bit/HLG output, ProRes or cloud service is claimed. "
+        "Photos and videos save to DCIM/MahdiCamera. No Internet permission, account, ads or analytics.\n\n"
         "Android 6+ (API 23), camera hardware required. Unsupported manual controls are disabled. "
         "Emulator tests verify actual video/audio samples and a decodable frame on API 23/35; physical "
         "Samsung/Xiaomi/Huawei and image quality/long-recording/rotation behavior are NOT yet device-tested. "
-        "No HDR/ProRes/LUT/Blackmagic Cloud equivalence is claimed.\n\n"
+        "No HDR/ProRes/Blackmagic Cloud equivalence is claimed. There is no in-app updater: "
+        "the APK stays offline and updates are installed manually from this release page.\n\n"
         f"Source: `{report['source_commit']}`\n\n"
         f"[Validation]({report['validation_url']})\n\n"
         f"APK SHA-256: `{report['apk_sha256']}`\n\n"

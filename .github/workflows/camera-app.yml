@@ -30,6 +30,7 @@ jobs:
           ruff check camera_magic tests scripts
           ruff format --check camera_magic tests scripts
           python scripts/check_java_syntax.py
+          python -m camera_magic app-luts --check
       - uses: actions/setup-java@v6.3.0
         with:
           distribution: temurin

@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.4.0 — GPU LOOK pipeline, stills and LUT import (stage 1)
+
+All code is original to this repository; see [ATTRIBUTION](ATTRIBUTION.md).
+
+- **LOOK engine.** A single GPU pass applies a 3D colour cube to the live preview *and* the
+  recorded frames through the same processed texture, so a preview-only filter is
+  impossible by construction. Strength, clarity, grain and vignette are adjustable;
+  strength 0 is an exact passthrough.
+- **Bundled looks.** Six original display-referred looks (Neutral, Natural, Punch, Cinema,
+  Soft light, Noir) generated deterministically by `python -m camera_magic app-luts`.
+  `tests/test_app_lut.py` proves the Java parser and the Python generator produce identical
+  atlases, so a look cannot grade differently in the preview than in the saved file.
+- **User LUTs.** Import `.cube` and `.png` atlases from the system picker. The parser
+  accepts the public 3D-cube format (comments, CRLF, comma separators, `DOMAIN_MIN/MAX`,
+  `LUT_3D_INPUT_RANGE`), rejects 1D cubes, oversized cubes, inverted or 8-bit/log-scaled
+  domains and non-finite entries with a user-readable message, and stores imports only in
+  app-private storage. Imported LUTs can be removed again.
+- **Still photos.** A new PHOTO action saves JPEGs to `DCIM/MahdiCamera`. With LOOK active
+  the graded GPU frame is read back so the photo matches the preview; otherwise the sensor
+  JPEG is used with the correct orientation hint.
+- **Honest fallback.** If the GPU path or an extra camera stream is rejected (common on
+  restricted HALs), the camera returns to the previous unfiltered path and the status line
+  says the preview is unfiltered. Nothing is ever recorded with a look label but no look.
+- **Engine and UI.** Optional preview target alongside the renderer target, JPEG reader for
+  the plain path, multi-surface session layouts tried in order, encoder timestamps kept
+  monotonic and repeated before detach, `OrientationHint` set to 0 only when the GPU already
+  drew upright frames.
+- **Stills keep the look without a GPU.** The renderer's cube is also available to the CPU
+  (`CubeLut.sample`, `LookGrade`), so a saved JPEG is graded with exactly the table the
+  preview uploads even on devices whose GLES cannot present the preview (the emulator
+  cannot create an EGL window surface at all). The status line reports which path is live.
+- **Tests.** 40 JVM unit tests (`.cube` parser contract, trilinear sampler and domain
+  handling, pure column-major orientation matrix, encoder rotation, viewport, tuning
+  immutability) and six instrumented tests, **all green on emulated API 23 and API 35**:
+  preview lifecycle, pause/resume, Activity recreation, bundled looks and on-device `.cube`
+  parsing, a still saved with the Noir look and measurably desaturated, and a recorded
+  MP4 whose H.264 and AAC tracks are decoded back.
+- **No new permissions.** The APK still has no `INTERNET` permission. An in-app updater is
+  designed but not shipped; see [docs/UPDATER.md](docs/UPDATER.md).
+- Fixed a pre-existing release self-test that accepted a 166 KB APK body in a
+  repository-dispatch handoff instead of asserting the size guard.
+- Fixed real bugs found by the emulator: every bundled look sampled the wrong cube geometry
+  (the tile grid was ignored), every `.cube` larger than 2³ failed import ("Corrupt atlas
+  buffer"), a rejected look session was retried in an endless loop so no preview appeared,
+  and a static camera lease could be lost forever ("Camera is still closing") after an
+  Activity was recreated or a recording stopped.
+
 ## 0.3.0 — Independent Mahdi Camera application
 
 - With the owner's explicit approval, change the deliverable from a name-only vendor
