@@ -23,6 +23,7 @@ public final class CubeLut {
 
     public final String title;
     public final int size;
+    /** Edge of the square atlas this cube renders to, in pixels (size × size). */
     public final int atlasSize;
     private final int[] argb;
     private final float[] domainMin;
@@ -79,19 +80,24 @@ public final class CubeLut {
      * import failure instead of crashing the camera.
      */
     public Bitmap toAtlas() {
-        if (atlasSize * atlasSize != argb.length) {
-            throw new IllegalStateException("Corrupt atlas buffer");
-        }
+        // The shader expects a square atlas whose edge is the cube size times the number of
+        // tiles per row. With `size` tiles per row the cube occupies the first tile row, so
+        // the buffer is padded out to size² x size², matching LutCatalog.Atlas.
+        int edge = atlasSize;
+        int[] square = new int[edge * edge];
+        // argb is already size tiles in a single row of width size*size, so it is the first
+        // `size` rows of the square atlas and can be copied in directly.
+        System.arraycopy(argb, 0, square, 0, Math.min(argb.length, square.length));
         try {
-            return Bitmap.createBitmap(argb, atlasSize, atlasSize, Bitmap.Config.ARGB_8888);
+            return Bitmap.createBitmap(square, edge, edge, Bitmap.Config.ARGB_8888);
         } catch (OutOfMemoryError error) {
             throw new IllegalStateException("This LUT is too large for this device: "
                     + atlasSize + "×" + atlasSize + " atlas");
         } catch (RuntimeException error) {
             // A hardware bitmap configuration without a graphics buffer throws here; fall
             // back to the software allocator so importing a LUT never crashes the camera.
-            Bitmap software = Bitmap.createBitmap(atlasSize, atlasSize, Bitmap.Config.ARGB_8888);
-            software.setPixels(argb, 0, atlasSize, 0, 0, atlasSize, atlasSize);
+            Bitmap software = Bitmap.createBitmap(edge, edge, Bitmap.Config.ARGB_8888);
+            software.setPixels(square, 0, edge, 0, 0, edge, edge);
             return software;
         }
     }

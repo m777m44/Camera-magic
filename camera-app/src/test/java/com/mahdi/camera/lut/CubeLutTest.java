@@ -156,6 +156,15 @@ public class CubeLutTest {
         }
     }
 
+    @Test public void atlasBufferIsAlwaysSizeCubedPixels() throws Exception {
+        for (int size = 2; size <= 9; size++) {
+            CubeLut cube = CubeLut.parse(cube(size, "LUT_3D_SIZE " + size + "\n"));
+            assertEquals("size cubed entries for " + size, size * size * size,
+                    cube.toAtlasPixels().length);
+            assertEquals("square atlas edge for " + size, size * size, cube.atlasSize);
+        }
+    }
+
     @Test public void fromPixelsRejectsAWrongLengthAtlas() {
         try {
             CubeLut.fromPixels(new int[7], 2, 0f, 1f, 0f, 1f, 0f, 1f);

@@ -30,14 +30,18 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.Semaphore;
 
 /** Camera2 + MediaRecorder. Preview and recording use the same capture controls. */
 @SuppressWarnings("deprecation")
 public final class CameraEngine {
     private static final String TAG = "MahdiCamera";
-    // Also serialize old/new Activity instances during rapid recreation.
-    private static final Semaphore CAMERA_LEASE = new Semaphore(1, true);
+    // Also serialize old/new Activity instances during rapid recreation. A lease is a
+    // deadline, not a flag: if the owning engine's thread dies before onClosed (a stopped
+    // Activity, a crashed main thread) the lease must expire, or every later camera open on
+    // the process would fail with "Camera is still closing".
+    private static final java.util.concurrent.atomic.AtomicLong LEASE_UNTIL =
+            new java.util.concurrent.atomic.AtomicLong(0L);
+    private static final long LEASE_MS = 4000L;
 
     interface Listener {
         void capabilities(Capabilities capabilities);
@@ -216,13 +220,20 @@ public final class CameraEngine {
 
     void pause() { active = false; worker.post(this::closeCamera); }
 
+    /** Diagnostics: is this engine or another one currently holding the camera lease? */
+    boolean holdsLeaseForTest() { return holdsCameraLease; }
+
     void shutdown() {
         active = false;
         worker.post(() -> { shuttingDown = true; closeCamera(); finishShutdown(); });
     }
 
     private void finishShutdown() {
-        if (shuttingDown && !opening && closingDevices.isEmpty()) thread.quitSafely();
+        if (!shuttingDown || opening || !closingDevices.isEmpty()) return;
+        // The thread is about to die, so nothing may still depend on this engine to release
+        // the lease: do it here rather than leaving the process locked out.
+        releaseCameraLease();
+        thread.quitSafely();
     }
 
     void selectLens(String id) {
@@ -259,15 +270,11 @@ public final class CameraEngine {
         if (context.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             fail("Camera permission is required."); return;
         }
-        if (holdsCameraLease) {
-            // A previous close never reported back, so the lease is already ours. Releasing
-            // and re-acquiring it here would race with another engine and could block this
-            // one for the whole deadline.
-            Log.w(TAG, "Reusing the camera lease; the previous close never reported back");
-        } else if (!CAMERA_LEASE.tryAcquire()) {
-            // Legacy HAL shutdown can legitimately take several seconds. Use a
-            // bounded wall-clock deadline, not a retry count consumed by queued resumes.
-            long now = android.os.SystemClock.elapsedRealtime();
+        long now = android.os.SystemClock.elapsedRealtime();
+        long until = LEASE_UNTIL.get();
+        if (until > now && !holdsCameraLease) {
+            // Another engine is genuinely still closing its device. Legacy HAL shutdown can
+            // take seconds; a short owned lease keeps that wait bounded either way.
             if (leaseDeadline == 0) leaseDeadline = now + 15000;
             if (now < leaseDeadline) worker.postDelayed(this::openCamera, 100);
             else {
@@ -275,6 +282,10 @@ public final class CameraEngine {
                 fail("Camera is still closing. Tap the preview to retry.");
             }
             return;
+        }
+        if (!holdsCameraLease) {
+            LEASE_UNTIL.set(now + LEASE_MS);
+            Log.i(TAG, "Camera lease acquired");
         }
         holdsCameraLease = true; leaseDeadline = 0;
         try {
@@ -919,7 +930,7 @@ public final class CameraEngine {
     }
 
     private void releaseCameraLease() {
-        if (holdsCameraLease) { holdsCameraLease = false; CAMERA_LEASE.release(); }
+        if (holdsCameraLease) { holdsCameraLease = false; LEASE_UNTIL.set(0L); }
     }
 
     private void closeDevice(CameraDevice device) {

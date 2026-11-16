@@ -92,8 +92,14 @@ public final class LutCatalog {
         public CubeLut cube() {
             int side = Math.round(size);
             int across = Math.round(tiles);
-            if (bitmap == null || side < CubeLut.MIN_SIZE || side > CubeLut.MAX_SIZE) return null;
-            if (across < 1 || across * side != bitmap.getWidth()
+            if (side < CubeLut.MIN_SIZE || side > CubeLut.MAX_SIZE) return null;
+            // A square atlas from CubeLut.toAtlas() has size tiles per row, so its edge is
+            // size*size even though only the first tile row carries the cube.
+            if (bitmap != null && bitmap.getWidth() == side * side
+                    && bitmap.getHeight() == side * side) {
+                across = side;
+            }
+            if (bitmap == null || across < 1 || across * side != bitmap.getWidth()
                     || across * side != bitmap.getHeight()) return null;
             int atlasWidth = across * side;
             int[] source = new int[atlasWidth * atlasWidth];
