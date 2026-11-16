@@ -519,7 +519,9 @@ public final class CameraEngine {
         main.post(() -> listener.recording(false));
         if (restart && active && camera != null) {
             if (Build.VERSION.SDK_INT < 24) {
-                worker.postDelayed(this::createPreview, 100);
+                // Legacy HAL1-over-Camera2 wrappers on API 23 can enter an error state
+                // when reconfiguring a session after MediaRecorder.stop(); reopen cleanly.
+                closeDevice(camera); camera = null;
             } else {
                 createPreview();
             }
