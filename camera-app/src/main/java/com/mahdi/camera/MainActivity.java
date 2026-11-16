@@ -774,7 +774,10 @@ public final class MainActivity extends Activity
         photoError = error;
         if (error != null) { status.setText(error); refresh(); toast(error); return; }
         lastPhoto = uri;
-        status.setText("Photo saved · " + tuning.describe());
+        // The full GPU state is shown so a user (or a bug report) can tell whether the still
+        // was graded or came from the unfiltered path.
+        status.setText("Photo saved · " + tuning.describe()
+                + (gl == null ? "" : " · " + gl.describeState()));
         toast("Photo saved");
         refresh();
         Intent view = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, "image/jpeg")
@@ -850,6 +853,8 @@ public final class MainActivity extends Activity
     GlPipeline lookForTest() { return gl; }
     Tuning tuningForTest() { return tuning; }
     Uri lastPhotoForTest() { return lastPhoto; }
+    String lookStateForTest() { return gl == null ? "no pipeline" : gl.describeState(); }
+    Tuning defaultLookForTest() { return Tuning.DEFAULT; }
     String photoErrorForTest() { return photoError; }
 
     /** Select a look and strength exactly as the LOOK picker does. */

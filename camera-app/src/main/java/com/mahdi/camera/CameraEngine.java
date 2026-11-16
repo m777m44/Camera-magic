@@ -189,6 +189,7 @@ public final class CameraEngine {
     private boolean shuttingDown;
     private boolean holdsCameraLease;
     private long leaseDeadline;
+    private int previewRetries;
 
     CameraEngine(Context context, Listener listener, GlPipeline lookPipeline) {
         this.context = context.getApplicationContext(); this.listener = listener;
@@ -466,7 +467,7 @@ public final class CameraEngine {
                 if (!active || camera == null || serial != sessionSerial) { configured.close(); return; }
                 session = configured;
                 try {
-                    repeat(false); previewReady = true; lastError = "";
+                    repeat(false); previewReady = true; lastError = ""; previewRetries = 0;
                     Log.i(TAG, "Preview ready generation " + generation + (look ? " (look)" : " (plain)"));
                     main.post(() -> listener.ready(true));
                 } catch (CameraAccessException | RuntimeException e) {
@@ -485,7 +486,18 @@ public final class CameraEngine {
                             "The look pipeline was rejected by the camera; preview is unfiltered."));
                     createPreview();
                 } else {
-                    fail("Preview configuration failed. Try another lens or resolution.");
+                    // Closing the recorder leaves the HAL busy for a moment. One bounded
+                    // retry avoids a dead preview without hiding a genuinely broken device.
+                    if (previewRetries < 1) {
+                        previewRetries++;
+                        Log.w(TAG, "Plain preview rejected once; retrying after the camera settles");
+                        worker.postDelayed(() -> {
+                            if (active && camera != null) createPreview();
+                        }, 400);
+                    } else {
+                        previewRetries = 0;
+                        fail("Preview configuration failed. Try another lens or resolution.");
+                    }
                 }
             }
         };
@@ -812,9 +824,12 @@ public final class CameraEngine {
         }
         main.post(() -> listener.recording(false));
         if (restart && active && camera != null) {
-            if (Build.VERSION.SDK_INT < 24) {
-                // Legacy HAL1-over-Camera2 wrappers on API 23 can enter an error state
-                // when reconfiguring a session after MediaRecorder.stop(); reopen cleanly.
+            // Legacy HAL1-over-Camera2 wrappers on API 23 can enter an error state when a
+            // session is reconfigured after MediaRecorder.stop(), and a renderer-backed
+            // session can be closed while the GL thread is still detaching its encoder
+            // surface. Both need a clean reopen rather than an immediate reconfigure.
+            if (Build.VERSION.SDK_INT < 24 || lookRendering) {
+                if (gl != null) gl.setEncoderSurface(null, 0L);
                 closeDevice(camera); camera = null;
             } else {
                 createPreview();

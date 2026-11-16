@@ -119,11 +119,24 @@ public class LookPipelineTest {
                 assertNotNull("bundled noir look", noir);
                 activity.applyLookForTest(noir, 1f);
             });
-            // The renderer needs a frame before a readback can succeed.
-            SystemClock.sleep(1500);
+            // Wait for the renderer to actually grade a frame, then record its state so a
+            // failure says whether this was a GPU problem or a look problem.
+            long renderDeadline = SystemClock.elapsedRealtime() + 15000;
+            String state = "";
+            while (SystemClock.elapsedRealtime() < renderDeadline) {
+                scenario.onActivity(activity -> lookState.set(activity.lookStateForTest()));
+                state = lookState.get();
+                if (state != null && state.contains("frames=") && !state.contains("frames=0")) break;
+                SystemClock.sleep(150);
+            }
+            assertTrue("The GPU pipeline never rendered a frame (" + state + "). "
+                    + "Emulator GLES support is required for this test.", state != null
+                    && state.contains("look=true") && !state.contains("strength=0%"));
+            SystemClock.sleep(500);
 
             AtomicReference<Uri> saved = new AtomicReference<>();
             AtomicReference<String> failure = new AtomicReference<>();
+            AtomicReference<String> lookState = new AtomicReference<>("");
             scenario.onActivity(MainActivity::photoForTest);
             long deadline = SystemClock.elapsedRealtime() + 20000;
             while (SystemClock.elapsedRealtime() < deadline && saved.get() == null

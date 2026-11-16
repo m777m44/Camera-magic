@@ -50,6 +50,11 @@ public final class LutCatalog {
             return name;
         }
 
+        /** A preset with no source is the explicit "no look" choice. */
+        public static Preset none() {
+            return new Preset("none", "None (no colour transform)", "mahdi_lut/none", null);
+        }
+
         public boolean isCube() {
             return file != null && file.getName().toLowerCase(Locale.US).endsWith(".cube");
         }

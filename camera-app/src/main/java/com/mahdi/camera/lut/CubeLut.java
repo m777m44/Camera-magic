@@ -87,6 +87,12 @@ public final class CubeLut {
         } catch (OutOfMemoryError error) {
             throw new IllegalStateException("This LUT is too large for this device: "
                     + atlasSize + "×" + atlasSize + " atlas");
+        } catch (RuntimeException error) {
+            // A hardware bitmap configuration without a graphics buffer throws here; fall
+            // back to the software allocator so importing a LUT never crashes the camera.
+            Bitmap software = Bitmap.createBitmap(atlasSize, atlasSize, Bitmap.Config.ARGB_8888);
+            software.setPixels(argb, 0, atlasSize, 0, 0, atlasSize, atlasSize);
+            return software;
         }
     }
 

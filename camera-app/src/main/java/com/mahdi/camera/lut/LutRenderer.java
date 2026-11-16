@@ -171,6 +171,15 @@ public final class LutRenderer implements AutoCloseable {
         return frameCount;
     }
 
+    /** Exposed read-only for the camera's own checks and for instrumented evidence. */
+    public float currentStrength() {
+        return strength;
+    }
+
+    public boolean hasLook() {
+        return lutTexture != 0;
+    }
+
     public int outputWidth() {
         return width;
     }
