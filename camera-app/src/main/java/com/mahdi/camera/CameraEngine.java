@@ -310,7 +310,11 @@ public final class CameraEngine {
                     if (closingCamera == device) {
                         closingCamera = null;
                         releaseCameraLease();
-                        openCamera();
+                        if (android.os.Build.VERSION.SDK_INT < 24) {
+                            worker.postDelayed(CameraEngine.this::openCamera, 150);
+                        } else {
+                            openCamera();
+                        }
                     }
                     finishShutdown();
                 }
