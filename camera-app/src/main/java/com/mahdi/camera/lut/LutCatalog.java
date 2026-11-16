@@ -73,9 +73,13 @@ public final class LutCatalog {
         public final float[] domainMax;
 
         Atlas(Bitmap bitmap, int size, float[] domainMin, float[] domainMax) {
+            this(bitmap, size, size, domainMin, domainMax);
+        }
+
+        Atlas(Bitmap bitmap, int size, int tiles, float[] domainMin, float[] domainMax) {
             this.bitmap = bitmap;
             this.size = size;
-            this.tiles = size;
+            this.tiles = tiles;
             this.domainMin = domainMin;
             this.domainMax = domainMax;
         }
@@ -87,21 +91,34 @@ public final class LutCatalog {
         /** CPU-gradable cube, so a saved still keeps exactly the previewed look. */
         public CubeLut cube() {
             int side = Math.round(size);
+            int across = Math.round(tiles);
             if (bitmap == null || side < CubeLut.MIN_SIZE || side > CubeLut.MAX_SIZE) return null;
-            if (bitmap.getWidth() != side * side || bitmap.getHeight() != side) return null;
-            int[] pixels = new int[side * side * side];
-            bitmap.getPixels(pixels, 0, side * side, 0, 0, side * side, side);
-            for (int index = 0; index < pixels.length; index++) {
-                int pixel = pixels[index];
-                // getPixels returns alpha-premultiplied colour; the cube is opaque.
-                int alpha = (pixel >>> 24) & 255;
-                if (alpha == 0 || alpha == 255) { pixels[index] = pixel | 0xFF000000; continue; }
-                int red = Math.min(255, (pixel >> 16 & 255) * 255 / alpha);
-                int green = Math.min(255, (pixel >> 8 & 255) * 255 / alpha);
-                int blue = Math.min(255, (pixel & 255) * 255 / alpha);
-                pixels[index] = 0xFF000000 | (red << 16) | (green << 8) | blue;
+            if (across < 1 || across * side != bitmap.getWidth()
+                    || across * side != bitmap.getHeight()) return null;
+            int atlasWidth = across * side;
+            int[] source = new int[atlasWidth * atlasWidth];
+            bitmap.getPixels(source, 0, atlasWidth, 0, 0, atlasWidth, atlasWidth);
+            // The atlas is a grid of tiles: one tile per blue slice, red across, green down.
+            int[] cube = new int[side * side * side];
+            for (int blue = 0; blue < side; blue++) {
+                for (int green = 0; green < side; green++) {
+                    for (int red = 0; red < side; red++) {
+                        int x = (blue % across) * side + red;
+                        int y = (blue / across) * side + green;
+                        int pixel = source[y * atlasWidth + x];
+                        // getPixels returns alpha-premultiplied colour; the cube is opaque.
+                        int alpha = (pixel >>> 24) & 255;
+                        if (alpha != 0 && alpha != 255) {
+                            int r = Math.min(255, (pixel >> 16 & 255) * 255 / alpha);
+                            int g = Math.min(255, (pixel >> 8 & 255) * 255 / alpha);
+                            int b = Math.min(255, (pixel & 255) * 255 / alpha);
+                            pixel = 0xFF000000 | (r << 16) | (g << 8) | b;
+                        }
+                        cube[(blue * side + green) * side + red] = pixel | 0xFF000000;
+                    }
+                }
             }
-            return CubeLut.fromPixels(pixels, side, domainMin[0], domainMax[0],
+            return CubeLut.fromPixels(cube, side, domainMin[0], domainMax[0],
                     domainMin[1], domainMax[1], domainMin[2], domainMax[2]);
         }
     }
@@ -128,6 +145,32 @@ public final class LutCatalog {
         }
         if (presets.isEmpty()) throw new IOException("No bundled LUT presets found");
         return Collections.unmodifiableList(presets);
+    }
+
+    /** {@code {size, tiles}} declared by the bundled manifest. */
+    static int[] bundledGeometry(AssetManager assets) throws IOException {
+        String index = readAsset(assets, ASSET_INDEX);
+        int size = jsonInt(index, "\"lut_size\"");
+        int tiles = jsonInt(index, "\"tiles\"");
+        if (size < CubeLut.MIN_SIZE || size > CubeLut.MAX_SIZE || tiles < 1
+                || tiles * size > 4096) {
+            throw new IOException("presets.json declares an unusable atlas geometry");
+        }
+        return new int[]{size, tiles};
+    }
+
+    /** First integer value of a JSON key, or -1 when it is absent. */
+    private static int jsonInt(String json, String quotedKey) throws IOException {
+        int at = json.indexOf(quotedKey);
+        if (at < 0) throw new IOException("presets.json is missing " + quotedKey);
+        int colon = json.indexOf(':', at);
+        if (colon < 0) throw new IOException("presets.json is malformed");
+        int end = colon + 1;
+        while (end < json.length() && " \t\r\n".indexOf(json.charAt(end)) >= 0) end++;
+        int start = end;
+        while (end < json.length() && Character.isDigit(json.charAt(end))) end++;
+        if (start == end) throw new IOException("presets.json has a non-numeric " + quotedKey);
+        return Integer.parseInt(json.substring(start, end));
     }
 
     /** User LUTs previously imported into app-private storage, newest first. */
@@ -200,8 +243,16 @@ public final class LutCatalog {
         if (preset == null) throw new IOException("No look selected");
         if (preset.isBundled()) {
             Bitmap bitmap = decodeBitmap(readAssetBytes(assets, preset.assetPath));
-            int size = (int) Math.round(Math.sqrt(bitmap.getWidth()));
-            return new Atlas(bitmap, size, new float[]{0f, 0f, 0f}, new float[]{1f, 1f, 1f});
+            // The manifest states the cube size and tile count; the atlas edge alone cannot
+            // distinguish a 16³ cube in a 4x4 grid from an 8³ cube in one row.
+            int[] geometry = bundledGeometry(assets);
+            int size = geometry[0];
+            int tiles = geometry[1];
+            if (bitmap.getWidth() != size * tiles || bitmap.getHeight() != size * tiles) {
+                bitmap.recycle();
+                throw new IOException("Bundled LUT atlas does not match presets.json");
+            }
+            return new Atlas(bitmap, size, tiles, new float[]{0f, 0f, 0f}, new float[]{1f, 1f, 1f});
         }
         if (preset.isCube()) {
             CubeLut cube = CubeLut.parse(new String(readFile(preset.file), "UTF-8"));

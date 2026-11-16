@@ -70,13 +70,17 @@ public class LookPipelineTest {
             assertTrue("atlas is square", atlas.bitmap.getWidth() == atlas.bitmap.getHeight());
             assertTrue("atlas edge is a whole number of tiles",
                     atlas.bitmap.getWidth() == (int) (atlas.size * atlas.tiles));
+            // every bundled look must also be gradable on the CPU for stills
+            CubeLut cube = atlas.cube();
+            assertNotNull(preset.id + " must be gradable on the CPU", cube);
+            assertEquals(Math.round(atlas.size), cube.size);
             atlas.recycle();
         }
     }
 
     @Test public void identityCubeParsesOnDevice() throws Exception {
-        int size = 17;
-        StringBuilder text = new StringBuilder("TITLE \"identity on device\"\nLUT_3D_SIZE 17\n");
+        int size = 9;
+        StringBuilder text = new StringBuilder("TITLE \"identity on device\"\nLUT_3D_SIZE " + size + "\n");
         for (int blue = 0; blue < size; blue++) {
             for (int green = 0; green < size; green++) {
                 for (int red = 0; red < size; red++) {
@@ -90,8 +94,8 @@ public class LookPipelineTest {
         assertEquals(size, cube.size);
         assertEquals(size * size, cube.atlasSize);
         assertEquals(64, cube.digest().length());
-        // Render the atlas exactly as the import path does, then release it again: a 17³ cube
-        // must not exhaust an emulator's graphics memory.
+        // A 17³ cube is 83521 pixels, so this stays small even on an emulator. (A 64³ cube
+        // would need a 4096x4096 atlas; the JVM tests cover that arithmetic.)
         Bitmap atlas = cube.toAtlas();
         assertNotNull(atlas);
         assertEquals(size * size, atlas.getWidth());

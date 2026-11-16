@@ -185,7 +185,9 @@ public final class CameraEngine {
     private int generation;
     private int sessionSerial;
     private boolean opening;
-    private CameraDevice closingCamera;
+    /** Devices this engine has asked the HAL to close and whose onClosed has not arrived. */
+    private final java.util.Set<CameraDevice> closingDevices =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     private boolean shuttingDown;
     private boolean holdsCameraLease;
     private long leaseDeadline;
@@ -220,7 +222,7 @@ public final class CameraEngine {
     }
 
     private void finishShutdown() {
-        if (shuttingDown && !opening && closingCamera == null) thread.quitSafely();
+        if (shuttingDown && !opening && closingDevices.isEmpty()) thread.quitSafely();
     }
 
     void selectLens(String id) {
@@ -253,11 +255,16 @@ public final class CameraEngine {
         // CameraDevice.close() is asynchronous. In particular, legacy HALs reject
         // a reopen before onClosed, even though our preview surface is already gone.
         if (!active || shuttingDown || texture == null || !texture.isAvailable()
-                || opening || camera != null || closingCamera != null) return;
+                || opening || camera != null || !closingDevices.isEmpty()) return;
         if (context.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             fail("Camera permission is required."); return;
         }
-        if (!CAMERA_LEASE.tryAcquire()) {
+        if (holdsCameraLease) {
+            // A previous close never reported back, so the lease is already ours. Releasing
+            // and re-acquiring it here would race with another engine and could block this
+            // one for the whole deadline.
+            Log.w(TAG, "Reusing the camera lease; the previous close never reported back");
+        } else if (!CAMERA_LEASE.tryAcquire()) {
             // Legacy HAL shutdown can legitimately take several seconds. Use a
             // bounded wall-clock deadline, not a retry count consumed by queued resumes.
             long now = android.os.SystemClock.elapsedRealtime();
@@ -298,7 +305,11 @@ public final class CameraEngine {
             manager.openCamera(selectedId, new CameraDevice.StateCallback() {
                 @Override public void onOpened(CameraDevice device) {
                     opening = false;
-                    if (!active || generation != requestGeneration) { closeDevice(device); return; }
+                    if (!active || generation != requestGeneration) {
+                        closeDevice(device);
+                        finishShutdown();
+                        return;
+                    }
                     camera = device;
                     createPreview();
                 }
@@ -320,13 +331,18 @@ public final class CameraEngine {
                 }
                 @Override public void onClosed(CameraDevice device) {
                     Log.i(TAG, "Camera closed " + device.getId() + " generation " + requestGeneration);
-                    if (closingCamera == device) {
-                        closingCamera = null;
+                    // Track every close we asked for: a stale open that returns after the
+                    // Activity was recreated must not make us forget the real closing device,
+                    // or the lease below would never be released.
+                    boolean expected = closingDevices.remove(device);
+                    if (expected && closingDevices.isEmpty() && camera == null && !opening) {
                         releaseCameraLease();
-                        if (android.os.Build.VERSION.SDK_INT < 24) {
-                            worker.postDelayed(CameraEngine.this::openCamera, 150);
-                        } else {
-                            openCamera();
+                        if (active && !shuttingDown) {
+                            if (android.os.Build.VERSION.SDK_INT < 24) {
+                                worker.postDelayed(CameraEngine.this::openCamera, 150);
+                            } else {
+                                openCamera();
+                            }
                         }
                     }
                     finishShutdown();
@@ -392,6 +408,8 @@ public final class CameraEngine {
         if (!lookRendering || gl == null) return;
         worker.postDelayed(() -> {
             if (!active || !lookRendering || gl == null || gl.hasFrame()) return;
+            // Never rebuild the session out from under a capture or a recording.
+            if (busy || isRecording || stillReader != null) return;
             Log.w(TAG, "Look pipeline received no frames; restoring the plain preview");
             lookRendering = false;
             gl.setPreviewSurface(null, 0, 0);
@@ -905,12 +923,15 @@ public final class CameraEngine {
     }
 
     private void closeDevice(CameraDevice device) {
-        closingCamera = device;
+        if (device == null) return;
+        closingDevices.add(device);
         device.close();
     }
 
     private void closeCamera() {
         ++generation; leaseDeadline = 0;
+        // Nothing is open and nothing is closing: nothing to wait for, so hand the lease on.
+        if (camera == null && !opening && closingDevices.isEmpty()) releaseCameraLease();
         // Do not clear opening: an outstanding open must return and be closed
         // before the next resume/lens/size request may open another device.
         stopRecordingInternal(false);
