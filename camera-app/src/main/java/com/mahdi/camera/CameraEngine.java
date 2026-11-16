@@ -517,7 +517,13 @@ public final class CameraEngine {
             } else finished.discard();
         }
         main.post(() -> listener.recording(false));
-        if (restart && active) createPreview();
+        if (restart && active && camera != null) {
+            if (Build.VERSION.SDK_INT < 24) {
+                worker.postDelayed(this::createPreview, 100);
+            } else {
+                createPreview();
+            }
+        }
     }
 
     private void releaseRecorder() {
