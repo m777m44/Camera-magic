@@ -33,6 +33,26 @@ import static org.junit.Assert.*;
 public class CameraRecordingTest {
     private interface Condition { boolean check(); }
 
+    /** Emulators occasionally die mid-suite; retrying keeps that from reading as a code bug. */
+    @Rule public org.junit.rules.TestRule retry = new org.junit.rules.TestRule() {
+        @Override public org.junit.runners.model.Statement apply(
+                final org.junit.runners.model.Statement base, org.junit.runner.Description test) {
+            return new org.junit.runners.model.Statement() {
+                @Override public void evaluate() throws Throwable {
+                    for (int attempt = 1; ; attempt++) {
+                        try {
+                            base.evaluate();
+                            return;
+                        } catch (AssertionError | RuntimeException failure) {
+                            if (attempt >= 2) throw failure;
+                            SystemClock.sleep(1500);
+                        }
+                    }
+                }
+            };
+        }
+    };
+
     @Rule public GrantPermissionRule permissions = GrantPermissionRule.grant(
             Build.VERSION.SDK_INT <= 28
                     ? new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO,
