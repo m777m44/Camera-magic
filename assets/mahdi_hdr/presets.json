@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "color_space": "SDR display-referred RGB, Rec.709/sRGB-like input; not Log, PQ or HLG",
+  "lut_size": 16,
+  "tiles": 4,
+  "cube_order": "red fastest, then green, then blue",
+  "strength_range": [0.0, 1.0],
+  "presets": [
+    {"id":"balanced","name":"Balanced HDR","exposure":0.0,"contrast":1.06,"saturation":1.04,"shadows":0.30,"highlights":0.24,"warmth":0.0,"clarity":0.30,"local_contrast":0.10},
+    {"id":"detail","name":"Crisp Detail","exposure":0.0,"contrast":1.08,"saturation":1.02,"shadows":0.25,"highlights":0.22,"warmth":0.0,"clarity":0.55,"local_contrast":0.18},
+    {"id":"natural","name":"Natural Soft HDR","exposure":0.0,"contrast":1.0,"saturation":1.0,"shadows":0.22,"highlights":0.18,"warmth":0.0,"clarity":0.14,"local_contrast":0.05},
+    {"id":"cinema","name":"Cinema Contrast","exposure":-0.08,"contrast":1.13,"saturation":0.88,"shadows":0.15,"highlights":0.32,"warmth":0.08,"clarity":0.22,"local_contrast":0.10},
+    {"id":"vivid","name":"Vivid Landscape","exposure":0.03,"contrast":1.10,"saturation":1.22,"shadows":0.25,"highlights":0.25,"warmth":0.02,"clarity":0.34,"local_contrast":0.14},
+    {"id":"shadow_lift","name":"Shadow Recovery Look","exposure":0.02,"contrast":1.02,"saturation":0.98,"shadows":0.60,"highlights":0.22,"warmth":0.0,"clarity":0.18,"local_contrast":0.06},
+    {"id":"highlight_soft","name":"Soft Highlights","exposure":-0.10,"contrast":1.02,"saturation":0.98,"shadows":0.25,"highlights":0.65,"warmth":0.0,"clarity":0.20,"local_contrast":0.07},
+    {"id":"cool","name":"Cool Clarity","exposure":0.0,"contrast":1.07,"saturation":1.05,"shadows":0.28,"highlights":0.28,"warmth":-0.25,"clarity":0.32,"local_contrast":0.12},
+    {"id":"warm","name":"Warm Detail","exposure":0.02,"contrast":1.05,"saturation":1.06,"shadows":0.28,"highlights":0.25,"warmth":0.25,"clarity":0.28,"local_contrast":0.10},
+    {"id":"mono","name":"Monochrome Detail","exposure":0.0,"contrast":1.13,"saturation":0.0,"shadows":0.30,"highlights":0.28,"warmth":0.0,"clarity":0.40,"local_contrast":0.15}
+  ],
+  "warning": "These are original pseudo-HDR looks, not extra sensor dynamic range or 10-bit HDR. Spatial clarity is applied by the shader, not by the LUT."
+}

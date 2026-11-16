@@ -1,0 +1,144 @@
+name: Source and HDR kit validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      shader_matrix:
+        description: "Run ONLY the original HDR kit's GPU shader tests on API 23/29/33/35 (not Blackmagic)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m unittest discover -v
+      - run: python -m camera_magic generate-luts --check
+      - run: ruff check camera_magic tests scripts && ruff format --check camera_magic tests scripts
+      - run: python scripts/check_java_syntax.py
+
+  android-library:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4.0.4
+      - uses: gradle/actions/setup-gradle@v6.4.1
+        with:
+          gradle-version: '8.11.1'
+      - name: Build and lint the original HDR kit
+        shell: bash
+        run: |
+          mkdir -p work
+          {
+            java -version
+            sdkmanager "platforms;android-35" "build-tools;35.0.0"
+            gradle --no-daemon :hdr-kit:assembleDebug :hdr-kit:assembleDebugAndroidTest :hdr-kit:lintDebug
+          } 2>&1 | tee work/android-validation.log
+      - name: Annotate build failure diagnostics
+        if: failure()
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("work/android-validation.log")
+          text = path.read_text(errors="replace")[-20000:] if path.exists() else "Build did not start; inspect the failing tool-setup step."
+          # GitHub truncates an individual annotation at 4096 characters.
+          text = text[-12000:]
+          for index in range(0, len(text), 3000):
+              chunk = text[index:index + 3000].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=HDR kit build diagnostics {index // 3000 + 1}::" + chunk)
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: hdr-kit-lint
+          path: hdr-kit/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
+
+  shader-matrix:
+    # Push/PR checks need only repository-write access; manual dispatch needs Actions-write.
+    if: github.event_name != 'workflow_dispatch' || inputs.shader_matrix
+    needs: [python, android-library]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 23
+            arch: x86
+          - api: 29
+            arch: x86_64
+          - api: 33
+            arch: x86_64
+          - api: 35
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v6.4.1
+        with:
+          gradle-version: '8.11.1'
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          arch: ${{ matrix.arch }}
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: bash -o pipefail -c 'mkdir -p work; gradle --no-daemon :hdr-kit:connectedDebugAndroidTest 2>&1 | tee work/shader-tests.log'
+      - name: Annotate shader failure diagnostics
+        if: failure()
+        shell: python
+        run: |
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          log = Path("work/shader-tests.log")
+          parts = [log.read_text(errors="replace")[-12000:]] if log.exists() else []
+          for path in Path("hdr-kit/build/outputs/androidTest-results").rglob("*.xml"):
+              try:
+                  for failure in ET.parse(path).getroot().iter("failure"):
+                      parts.append(failure.get("message", "") + "\n" + (failure.text or ""))
+              except ET.ParseError:
+                  pass
+          text = "\n".join(parts)[-24000:] or "Emulator/tool setup failed before instrumented tests; inspect the failing action."
+          # Keep the useful error tail visible through the Checks API as well as run logs.
+          text = text[-12000:]
+          for index in range(0, len(text), 3000):
+              chunk = text[index:index + 3000].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=HDR kit shader diagnostics {index // 3000 + 1}::" + chunk)
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: hdr-kit-shader-tests-api-${{ matrix.api }}
+          path: |
+            hdr-kit/build/reports/androidTests/
+            hdr-kit/build/outputs/androidTest-results/
+          if-no-files-found: ignore
