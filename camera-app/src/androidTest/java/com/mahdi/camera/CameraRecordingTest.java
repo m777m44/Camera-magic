@@ -120,10 +120,24 @@ public class CameraRecordingTest {
             scenario.onActivity(activity -> reference.set(activity.cameraForTest()));
             CameraEngine engine = reference.get();
             await("Initial preview", engine::isPreviewReady, engine);
-            scenario.moveToState(Lifecycle.State.CREATED);
-            await("Camera closed in background", () -> !engine.isPreviewReady(), engine);
-            scenario.moveToState(Lifecycle.State.RESUMED);
-            await("Camera reopened in foreground", engine::isPreviewReady, engine);
+            for (int i = 0; i < 3; i++) {
+                scenario.moveToState(Lifecycle.State.CREATED);
+                await("Camera closed in background", () -> !engine.isPreviewReady(), engine);
+                scenario.moveToState(Lifecycle.State.RESUMED);
+                await("Camera reopened in foreground", engine::isPreviewReady, engine);
+            }
+        }
+    }
+
+    @Test public void rapidActivityRecreationWaitsForPreviousCameraToClose() {
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            AtomicReference<CameraEngine> reference = new AtomicReference<>();
+            for (int i = 0; i < 3; i++) {
+                scenario.onActivity(activity -> reference.set(activity.cameraForTest()));
+                CameraEngine engine = reference.get();
+                await("Preview after Activity recreation", engine::isPreviewReady, engine);
+                if (i < 2) scenario.recreate();
+            }
         }
     }
 }

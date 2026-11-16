@@ -532,9 +532,18 @@ public final class MainActivity extends Activity
 
     private void toast(String text) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); }
 
-    @Override public void onSurfaceTextureAvailable(SurfaceTexture texture, int width, int height) { startPreview(); }
-    @Override public void onSurfaceTextureSizeChanged(SurfaceTexture texture, int width, int height) { transform(); }
-    @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture texture) { engine.pause(); return true; }
+    @Override public void onSurfaceTextureAvailable(SurfaceTexture texture, int width, int height) {
+        if (preview.getSurfaceTexture() == texture) startPreview();
+    }
+    @Override public void onSurfaceTextureSizeChanged(SurfaceTexture texture, int width, int height) {
+        if (preview.getSurfaceTexture() == texture) transform();
+    }
+    @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture texture) {
+        // A detached, obsolete view can finish teardown after a replacement view
+        // has become available during a configuration change. Do not pause that new preview.
+        if (preview.getSurfaceTexture() == texture) engine.pause();
+        return true;
+    }
     @Override public void onSurfaceTextureUpdated(SurfaceTexture texture) { }
 
     // Instrumentation exercises the same engine and record button as a user, never a fake camera.

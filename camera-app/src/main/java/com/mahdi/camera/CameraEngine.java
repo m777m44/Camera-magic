@@ -18,6 +18,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.util.Log;
 import android.util.Range;
 import android.util.Size;
 import android.view.Surface;
@@ -27,10 +28,15 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Semaphore;
 
 /** Camera2 + MediaRecorder. Preview and recording use the same capture controls. */
 @SuppressWarnings("deprecation")
 public final class CameraEngine {
+    private static final String TAG = "MahdiCamera";
+    // Also serialize old/new Activity instances during rapid recreation.
+    private static final Semaphore CAMERA_LEASE = new Semaphore(1, true);
+
     interface Listener {
         void capabilities(Capabilities capabilities);
         void ready(boolean ready);
@@ -168,6 +174,10 @@ public final class CameraEngine {
     private int generation;
     private int sessionSerial;
     private boolean opening;
+    private CameraDevice closingCamera;
+    private boolean shuttingDown;
+    private boolean holdsCameraLease;
+    private int leaseAttempts;
 
     CameraEngine(Context context, Listener listener) {
         this.context = context.getApplicationContext(); this.listener = listener;
@@ -193,7 +203,11 @@ public final class CameraEngine {
 
     void shutdown() {
         active = false;
-        worker.post(() -> { closeCamera(); thread.quitSafely(); });
+        worker.post(() -> { shuttingDown = true; closeCamera(); finishShutdown(); });
+    }
+
+    private void finishShutdown() {
+        if (shuttingDown && !opening && closingCamera == null) thread.quitSafely();
     }
 
     void selectLens(String id) {
@@ -223,10 +237,19 @@ public final class CameraEngine {
 
     @SuppressLint("MissingPermission")
     private void openCamera() {
-        if (!active || texture == null || !texture.isAvailable() || opening || camera != null) return;
+        // CameraDevice.close() is asynchronous. In particular, legacy HALs reject
+        // a reopen before onClosed, even though our preview surface is already gone.
+        if (!active || shuttingDown || texture == null || !texture.isAvailable()
+                || opening || camera != null || closingCamera != null) return;
         if (context.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             fail("Camera permission is required."); return;
         }
+        if (!CAMERA_LEASE.tryAcquire()) {
+            if (++leaseAttempts <= 30) worker.postDelayed(this::openCamera, 100);
+            else { active = false; fail("Camera is still closing. Tap the preview to retry."); }
+            return;
+        }
+        holdsCameraLease = true; leaseAttempts = 0;
         try {
             String[] ids = manager.getCameraIdList();
             if (ids.length == 0) throw new IOException("No cameras were reported by Android.");
@@ -251,28 +274,44 @@ public final class CameraEngine {
             main.post(() -> listener.capabilities(current));
             opening = true;
             final int requestGeneration = ++generation;
+            Log.i(TAG, "Opening camera " + selectedId + " generation " + requestGeneration);
             manager.openCamera(selectedId, new CameraDevice.StateCallback() {
                 @Override public void onOpened(CameraDevice device) {
                     opening = false;
-                    if (!active || generation != requestGeneration) { device.close(); return; }
+                    if (!active || generation != requestGeneration) { closeDevice(device); return; }
                     camera = device;
                     createPreview();
                 }
                 @Override public void onDisconnected(CameraDevice device) {
-                    device.close();
+                    opening = false;
                     if (generation == requestGeneration) {
-                        opening = false; closeCamera(); fail("Camera disconnected. Return to the app to retry.");
+                        active = false; closeCamera();
+                        fail("Camera disconnected. Tap the preview or return to the app to retry.");
                     }
+                    closeDevice(device);
                 }
                 @Override public void onError(CameraDevice device, int error) {
-                    device.close();
+                    opening = false;
                     if (generation == requestGeneration) {
-                        opening = false; closeCamera(); fail("Camera error " + error + ". Another app may be using it.");
+                        active = false; closeCamera();
+                        fail("Camera error " + error + ". Tap the preview to retry; another app may be using it.");
                     }
+                    closeDevice(device);
+                }
+                @Override public void onClosed(CameraDevice device) {
+                    Log.i(TAG, "Camera closed " + device.getId() + " generation " + requestGeneration);
+                    if (closingCamera == device) {
+                        closingCamera = null;
+                        releaseCameraLease();
+                        openCamera();
+                    }
+                    finishShutdown();
                 }
             }, worker);
         } catch (CameraAccessException | IOException | RuntimeException e) {
-            opening = false; fail("Cannot open camera: " + e.getMessage());
+            opening = false; releaseCameraLease();
+            fail("Cannot open camera: " + e.getMessage());
+            finishShutdown();
         }
     }
 
@@ -316,7 +355,8 @@ public final class CameraEngine {
                             if (!active || camera == null || serial != sessionSerial) { configured.close(); return; }
                             session = configured;
                             try {
-                                repeat(false); previewReady = true;
+                                repeat(false); previewReady = true; lastError = "";
+                                Log.i(TAG, "Preview ready generation " + generation);
                                 main.post(() -> listener.ready(true));
                             } catch (CameraAccessException | RuntimeException e) {
                                 configured.close(); fail("Preview failed: " + e.getMessage());
@@ -486,16 +526,28 @@ public final class CameraEngine {
         }
     }
 
+    private void releaseCameraLease() {
+        if (holdsCameraLease) { holdsCameraLease = false; CAMERA_LEASE.release(); }
+    }
+
+    private void closeDevice(CameraDevice device) {
+        closingCamera = device;
+        device.close();
+    }
+
     private void closeCamera() {
-        ++generation; opening = false;
+        ++generation; leaseAttempts = 0;
+        // Do not clear opening: an outstanding open must return and be closed
+        // before the next resume/lens/size request may open another device.
         stopRecordingInternal(false);
         closeSession();
-        if (camera != null) { camera.close(); camera = null; }
+        if (camera != null) { closeDevice(camera); camera = null; }
         if (previewSurface != null) { previewSurface.release(); previewSurface = null; }
         main.post(() -> listener.ready(false));
     }
 
     private void fail(String message) {
+        Log.e(TAG, message);
         lastError = message;
         main.post(() -> listener.error(message));
     }
