@@ -256,6 +256,44 @@ class AppReleaseTests(unittest.TestCase):
         self.assertIn("app_release receive", text)
         self.assertIn("app_release publish", text)
 
+    def test_preview_download_never_stands_in_for_the_signed_release(self):
+        """The debug download channel must not be able to hijack the permanent link.
+
+        `/releases/latest/download/Mahdi_Camera.apk` is the app's public, permanent address
+        and the in-app updater story depends on it being a release-signed build. A preview
+        build is only for trying the app, so it must never be marked latest, must never
+        publish under the release asset name, and must publish the debug variant.
+        """
+        text = (ROOT / ".github/workflows/preview-apk.yml").read_text()
+        workflow = yaml.load(text, Loader=yaml.BaseLoader)
+        self.assertNotIn("pull_request", workflow["on"])
+        self.assertNotIn("pull_request_target", workflow["on"])
+        condition = workflow["jobs"]["preview"]["if"]
+        self.assertIn("head_repository.full_name == github.repository", condition)
+        # Look at the actual gh commands: comments and notes may name the release link, but
+        # no upload may claim the Latest slot or publish under the release asset name.
+        commands = [
+            line.strip() for line in text.splitlines() if line.strip().startswith("gh release")
+        ]
+        self.assertTrue(commands, "the workflow must publish something")
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertNotIn("--latest", command)
+                self.assertNotIn(app.ASSET, command)
+        self.assertIn("--prerelease", text)
+        self.assertIn("Mahdi_Camera-preview.apk", text)
+        # It publishes the debug variant, and proves that before uploading.
+        self.assertIn(":camera-app:assembleDebug", text)
+        self.assertIn("CN=Android Debug", text)
+        # A preview must not read the release key or build the release variant, whatever the
+        # surrounding comments say, so check the executable parts only.
+        executable = "\n".join(
+            line for line in text.splitlines() if not line.strip().startswith("#")
+        )
+        self.assertNotIn("MAHDI_APP_KEYSTORE_B64", executable)
+        self.assertNotIn("assembleRelease", executable)
+        self.assertNotIn("secrets.", executable)
+
     def test_release_evidence_cannot_be_forged_by_setting_only_the_hash(self):
         target = self.root / app.ASSET
         target.write_bytes(self.apk.read_bytes())

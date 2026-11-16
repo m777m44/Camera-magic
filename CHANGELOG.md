@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — installable preview download
+
+- **Preview build channel.** `Preview APK download` (`preview-apk.yml`) builds the debug
+  APK from `main` after a successful validation run and publishes it as a rolling
+  **prerelease** tagged `preview`, with `Mahdi_Camera-preview.apk`, a SHA-256 file and the
+  signing certificate. It exists because the signed release is deliberately opt-in, so
+  without the owner's key there was no file to install at all.
+- **It cannot be mistaken for the release.** The workflow never uses `--latest`, never
+  publishes under `Mahdi_Camera.apk`, never reads the release key and only builds
+  `assembleDebug`; it verifies the `CN=Android Debug` certificate before uploading. A policy
+  test enforces all of that, so the permanent `/releases/latest` link stays reserved for the
+  signed release.
+
 ## 0.4.0 — GPU LOOK pipeline, stills and LUT import (stage 1)
 
 All code is original to this repository; see [ATTRIBUTION](ATTRIBUTION.md).

@@ -1,0 +1,135 @@
+name: Preview APK download
+
+# A download-only builds channel, deliberately separate from the signed release.
+#
+# It exists because the signed release is opt-in: with no owner signing key configured, the
+# "Publish Mahdi Camera APK" workflow correctly refuses to build or publish anything, so
+# there is no file to install. This workflow gives an installable APK for trying the app,
+# and says so everywhere: the asset name, the tag, the notes and the checksum file all mark
+# it as a debug build signed with a throwaway key.
+#
+# Two hard rules keep it from ever standing in for a release:
+#   1. It never runs `gh release --latest`, so it cannot become /releases/latest and cannot
+#      take over the permanent Mahdi_Camera.apk link.
+#   2. It only publishes the debug variant, which uses the Android debug keystore. Its
+#      signature differs from the release key, so it can never be updated by a release
+#      build and can never be confused with one.
+
+on:
+  workflow_run:
+    workflows: ["Mahdi Camera app validation"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mahdi-camera-preview-apk
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+      - uses: actions/setup-java@v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4.0.4
+      - uses: gradle/actions/setup-gradle@v6.4.1
+        with:
+          gradle-version: '8.11.1'
+      - name: Build the debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "platforms;android-35" "build-tools;36.0.0"
+          export MAHDI_VERSION_CODE=$(git rev-list --count HEAD)
+          gradle --no-daemon :camera-app:assembleDebug
+      - name: Name the APK, prove it is the debug build, and checksum it
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          apk=camera-app/build/outputs/apk/debug/camera-app-debug.apk
+          test -f "$apk"
+          # Pin the same Build-Tools version the release path uses, so "verified" here means
+          # the same toolchain as the validated build.
+          signer="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/36.0.0/apksigner"
+          test -x "$signer"
+          "$signer" verify --print-certs "$apk" | tee artifacts/certificate.txt
+          # Refuse to publish anything that is not the throwaway debug signature.
+          grep -qi 'CN=Android Debug' artifacts/certificate.txt
+          cp "$apk" artifacts/Mahdi_Camera-preview.apk
+          cd artifacts
+          sha256sum Mahdi_Camera-preview.apk > SHA256SUMS-preview.txt
+          cat SHA256SUMS-preview.txt
+      - name: Write the download notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit=$(git rev-parse HEAD)
+          cat > artifacts/notes.md <<NOTES
+          # Mahdi Camera — preview (debug) build
+
+          **This is not the release APK.** It is built from \`main\` at commit
+          \`${commit}\` and signed with the standard Android **debug** keystore.
+
+          - Install it to try the app: \`adb install -r Mahdi_Camera-preview.apk\`
+          - It installs alongside other camera apps: package \`com.mahdi.camera\`.
+          - It **cannot** be updated by a release build, and a release build cannot be
+            installed over it, because the signing keys differ. Uninstall this preview
+            before installing a release.
+          - The permanent, release-signed link stays
+            \`/releases/latest/download/Mahdi_Camera.apk\` and is produced only by
+            \`Publish Mahdi Camera APK\` once the owner's signing secrets exist.
+          - Verify what you downloaded: see \`SHA256SUMS-preview.txt\` below.
+
+          Features in this build: live preview, H.264/AAC recording, JPEG stills, six
+          bundled looks plus .cube/.png import, CPU-graded stills when the GPU cannot
+          present. No internet permission.
+          NOTES
+          cat artifacts/notes.md
+      - name: Publish or refresh the rolling preview download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=preview
+          # Never --latest: /releases/latest must stay reserved for the signed release.
+          if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$tag" artifacts/Mahdi_Camera-preview.apk \
+              artifacts/SHA256SUMS-preview.txt artifacts/certificate.txt --clobber --repo "$GH_REPO"
+            gh release edit "$tag" --repo "$GH_REPO" --prerelease \
+              --title "Mahdi Camera preview (debug build, not the release)" \
+              --notes-file artifacts/notes.md
+          else
+            gh release create "$tag" --repo "$GH_REPO" --target "$(git rev-parse HEAD)" \
+              --prerelease --title "Mahdi Camera preview (debug build, not the release)" \
+              --notes-file artifacts/notes.md \
+              artifacts/Mahdi_Camera-preview.apk \
+              artifacts/SHA256SUMS-preview.txt artifacts/certificate.txt
+          fi
+          {
+            echo "### Preview APK published"
+            echo
+            echo "Download: https://github.com/${GH_REPO}/releases/download/${tag}/Mahdi_Camera-preview.apk"
+          } >> "$GITHUB_STEP_SUMMARY"
