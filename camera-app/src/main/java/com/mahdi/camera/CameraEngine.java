@@ -438,7 +438,7 @@ public final class CameraEngine {
             final boolean activeLook = lookRendering;
             main.post(() -> listener.lookActive(activeLook, activeLook ? ""
                     : "Live look rendering is unavailable on this device; recording is unfiltered."));
-        } catch (CameraAccessException | RuntimeException e) { fail("Preview unavailable: " + e.getMessage()); }
+        } catch (RuntimeException e) { fail("Preview unavailable: " + e.getMessage()); }
     }
 
     /**
@@ -594,7 +594,7 @@ public final class CameraEngine {
                             if (serial == sessionSerial) recordingFailed(new IOException("Video session rejected by camera."));
                         }
                     }, targets, fallback, true);
-        } catch (CameraAccessException | IOException | RuntimeException e) { recordingFailed(e); }
+        } catch (IOException | RuntimeException e) { recordingFailed(e); }
     }
 
     void stopRecording() { worker.post(() -> stopRecordingInternal(true)); }
@@ -718,7 +718,7 @@ public final class CameraEngine {
                 }
             }, targets, Arrays.asList(stillReader.getSurface()), false);
             // `targets` above is the preferred layout; the JPEG reader alone is the fallback.
-        } catch (CameraAccessException | RuntimeException error) {
+        } catch (RuntimeException error) {
             busy = false;
             photoFailed("Still capture failed: " + error.getMessage());
             closeStillReader();
