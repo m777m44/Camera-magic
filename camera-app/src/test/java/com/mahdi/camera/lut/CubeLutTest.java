@@ -65,18 +65,29 @@ public class CubeLutTest {
     }
 
     @Test public void rejectsNonFiniteValues() {
-        expectRejected("LUT_3D_SIZE 2\nNaN 0 0\n", "non-finite");
+        // A line that does not start with a number is an unknown keyword per the format,
+        // so the NaN has to be inside an entry that the parser will actually read.
+        expectRejected("LUT_3D_SIZE 2\n0 NaN 0\n", "non-finite");
+    }
+
+    @Test public void rejectsLogScaledDomain() {
+        expectRejected("LUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 255 255 255\n", "DOMAIN");
     }
 
     @Test public void rejectsInvalidDomain() {
-        expectRejected("LUT_3D_SIZE 2\nDOMAIN_MIN 1 1 1\nDOMAIN_MAX 0 0 0\n0 0 0\n", "DOMAIN");
+        expectRejected("LUT_3D_SIZE 2\nDOMAIN_MIN 1 1 1\nDOMAIN_MAX 0 0 0\n", "DOMAIN");
     }
 
     @Test public void inputRangeIsNormalisedIntoTheAtlas() throws Exception {
-        // A LOG-style range that spans 0..2 must not produce clipped black output.
+        // LUT_3D_INPUT_RANGE takes two numbers: the file's own 0..2 scale. Reading the
+        // substring with one wrong offset used to eat the leading digit of the range.
         CubeLut lut = CubeLut.parse(cube(2, "LUT_3D_SIZE 2\nLUT_3D_INPUT_RANGE 0 2\n"));
         assertEquals(0f, lut.minValue(), 0f);
         assertEquals(2f, lut.maxValue(), 0f);
+    }
+
+    @Test public void inputRangeRejectsAReversedRange() {
+        expectRejected("LUT_3D_SIZE 2\nLUT_3D_INPUT_RANGE 2 1\n", "input range");
     }
 
     @Test public void lastEntryIsWhiteAndFirstIsBlackForAnIdentityCube() throws Exception {

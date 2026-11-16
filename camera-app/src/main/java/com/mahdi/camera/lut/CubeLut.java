@@ -150,8 +150,8 @@ public final class CubeLut {
                 throw new LutException("1D LUTs are not supported; export a 3D .cube");
             }
             if (upper.startsWith("LUT_3D_INPUT_RANGE")) {
-                // "LUT_3D_INPUT_RANGE" is 18 characters; a wrong offset eats the first digit.
-                float[] range = parseTriple(line.substring("LUT_3D_INPUT_RANGE".length()).trim(),
+                // "LUT_3D_INPUT_RANGE" is 18 characters and takes TWO numbers: min max.
+                float[] range = parsePair(line.substring("LUT_3D_INPUT_RANGE".length()).trim(),
                         "LUT_3D_INPUT_RANGE");
                 minValue = range[0];
                 maxValue = range[1];
@@ -164,6 +164,7 @@ public final class CubeLut {
             }
             if (upper.startsWith("DOMAIN_MAX")) {
                 domainMax = parseTriple(line.substring(10).trim(), "DOMAIN_MAX");
+                validateDomain(domainMin, domainMax);
                 continue;
             }
             if (startsNumeric(line)) {
@@ -189,15 +190,7 @@ public final class CubeLut {
         if (!sawData || count != red.length) {
             throw new LutException("Expected " + red.length + " entries, found " + count);
         }
-        for (int channel = 0; channel < 3; channel++) {
-            if (!(domainMax[channel] > domainMin[channel])) {
-                throw new LutException("Invalid DOMAIN_MIN/DOMAIN_MAX: max must exceed min");
-            }
-            if (Math.abs(domainMin[channel]) > 4f || Math.abs(domainMax[channel]) > 4f) {
-                // A LUT domain outside -4..4 is almost certainly a log/scale mix-up.
-                throw new LutException("Unsupported DOMAIN range; export a display-referred LUT");
-            }
-        }
+        validateDomain(domainMin, domainMax);
         int[] argb = new int[red.length];
         for (int index = 0; index < argb.length; index++) {
             // Normalise into the atlas: the shader samples the cube at 0..1.
@@ -207,6 +200,36 @@ public final class CubeLut {
             argb[index] = pack(to8(r), to8(g), to8(b));
         }
         return new CubeLut(title, size, argb, domainMin, domainMax, minValue, maxValue);
+    }
+
+    /** DOMAIN_MIN/MAX bracket the values in the file; an inverted or huge range is a mistake. */
+    private static void validateDomain(float[] min, float[] max) throws LutException {
+        for (int channel = 0; channel < 3; channel++) {
+            if (!(max[channel] > min[channel])) {
+                throw new LutException("Invalid DOMAIN_MIN/DOMAIN_MAX: max must exceed min");
+            }
+            if (Math.abs(min[channel]) > 4f || Math.abs(max[channel]) > 4f) {
+                // Outside -4..4 is almost always a log-domain or 0..255 scale mix-up.
+                throw new LutException("Unsupported DOMAIN range; export a display-referred LUT");
+            }
+        }
+    }
+
+    private static float[] parsePair(String text, String what) throws LutException {
+        String[] parts = text.split("[\\s,]+");
+        if (parts.length != 2) throw new LutException(what + ": expected two numbers");
+        float[] values = new float[2];
+        for (int i = 0; i < 2; i++) {
+            try {
+                values[i] = Float.parseFloat(parts[i]);
+            } catch (NumberFormatException error) {
+                throw new LutException(what + ": invalid number");
+            }
+            if (Float.isNaN(values[i]) || Float.isInfinite(values[i])) {
+                throw new LutException(what + ": non-finite number");
+            }
+        }
+        return values;
     }
 
     private static float normalise(float value, float min, float max) {
