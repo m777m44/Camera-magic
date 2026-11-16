@@ -14,7 +14,7 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
-import android.hardware.ImageReader;
+import android.media.ImageReader;
 import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
@@ -368,19 +368,18 @@ public final class CameraEngine {
         attempts.add(preferred);
         if (fallback != null) attempts.add(fallback);
         attempts.add(Collections.singletonList(preferred.get(0)));
-        RuntimeException last = null;
+        String last = null;
         for (List<Surface> attempt : attempts) {
             try {
                 camera.createCaptureSession(attempt, callback, worker);
                 return;
             } catch (CameraAccessException | RuntimeException error) {
-                last = error;
-                Log.w(TAG, "Capture session rejected (" + attempt.size() + " surfaces): "
-                        + error.getMessage());
+                last = error.getMessage();
+                Log.w(TAG, "Capture session rejected (" + attempt.size() + " surfaces): " + last);
             }
         }
         // Every combination failed: let the caller's normal rejection path run.
-        sessionRejected(look, last == null ? "Camera rejected every session layout." : String.valueOf(last.getMessage()));
+        sessionRejected(look, last == null ? "Camera rejected every session layout." : last);
     }
 
     /** Shared rejection handling for a capture session that could not be created. */
@@ -594,7 +593,7 @@ public final class CameraEngine {
                             configured.close();
                             if (serial == sessionSerial) recordingFailed(new IOException("Video session rejected by camera."));
                         }
-                    }, fallback, true);
+                    }, targets, fallback, true);
         } catch (CameraAccessException | IOException | RuntimeException e) { recordingFailed(e); }
     }
 
@@ -717,7 +716,8 @@ public final class CameraEngine {
                     closeStillReader();
                     if (active && camera != null) createPreview();
                 }
-            }, Arrays.asList(stillReader.getSurface()), false);
+            }, targets, Arrays.asList(stillReader.getSurface()), false);
+            // `targets` above is the preferred layout; the JPEG reader alone is the fallback.
         } catch (CameraAccessException | RuntimeException error) {
             busy = false;
             photoFailed("Still capture failed: " + error.getMessage());
