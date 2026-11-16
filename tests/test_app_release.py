@@ -25,6 +25,11 @@ def metadata():
         "min_sdk": "23",
         "target_sdk": "35",
         "permissions": list(app.PERMISSIONS),
+        "permission_details": [
+            {"name": name, "max_sdk": "28" if name.endswith("_EXTERNAL_STORAGE") else None}
+            for name in app.PERMISSIONS
+        ],
+        "implied_permissions": [],
         "launchable_activity": app.APP_ID + ".MainActivity",
         "version_name": "1.0.1",
     }
@@ -80,6 +85,40 @@ class AppReleaseTests(unittest.TestCase):
             candidate[field] = value
             with self.subTest(field=field), self.assertRaises(MagicError):
                 app.check_metadata(candidate)
+
+    def test_aapt_implied_legacy_read_requires_proof_and_android_9_cap(self):
+        candidate = metadata()
+        read = "android.permission.READ_EXTERNAL_STORAGE"
+        candidate["permissions"].append(read)
+        detail = {"name": read, "max_sdk": "28"}
+        candidate["permission_details"].append(detail)
+        candidate["implied_permissions"] = [
+            {**detail, "reason": "requested WRITE_EXTERNAL_STORAGE"}
+        ]
+        app.check_metadata(candidate)
+        for field, value in (
+            ("implied_permissions", []),
+            ("implied_permissions", [{**detail, "reason": "unknown implication"}]),
+            ("permission_details", []),
+            (
+                "permission_details",
+                [
+                    {**item, "max_sdk": None} if item["name"] == read else item
+                    for item in candidate["permission_details"]
+                ],
+            ),
+            ("permissions", candidate["permissions"] + [read]),
+        ):
+            with self.subTest(field=field), self.assertRaises(MagicError):
+                app.check_metadata({**candidate, field: value})
+
+    def test_legacy_write_cannot_request_uncapped_storage(self):
+        candidate = metadata()
+        for item in candidate["permission_details"]:
+            if item["name"].endswith("WRITE_EXTERNAL_STORAGE"):
+                item["max_sdk"] = None
+        with self.assertRaises(MagicError):
+            app.check_metadata(candidate)
 
     def test_signing_can_only_change_jar_signature_files_not_resources_or_dex(self):
         signed = fixture(self.root / "signed.apk", signed=True)

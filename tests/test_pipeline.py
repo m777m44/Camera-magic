@@ -199,6 +199,24 @@ class PipelineTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertEqual("23", badging(self.apk, self.tools)["min_sdk"])
 
+    @patch("camera_magic.pipeline.run")
+    def test_badging_preserves_implied_permission_cap_and_reason(self, mocked):
+        text = BADGING + (
+            "uses-permission: name='android.permission.WRITE_EXTERNAL_STORAGE' maxSdkVersion='28'\n"
+            "uses-permission: name='android.permission.READ_EXTERNAL_STORAGE' maxSdkVersion='28'\n"
+            "uses-implied-permission: name='android.permission.READ_EXTERNAL_STORAGE' "
+            "maxSdkVersion='28' reason='requested WRITE_EXTERNAL_STORAGE'\n"
+        )
+        mocked.return_value = subprocess.CompletedProcess([], 0, text, "")
+        info = badging(self.apk, self.tools)
+        read = {"name": "android.permission.READ_EXTERNAL_STORAGE", "max_sdk": "28"}
+        self.assertIn(read, info["permission_details"])
+        self.assertEqual(
+            [{**read, "reason": "requested WRITE_EXTERNAL_STORAGE"}],
+            info["implied_permissions"],
+        )
+        self.assertEqual(3, len(info["permissions"]))
+
     def test_changed_yaml_after_patch_is_rejected(self):
         import yaml
         from tests.helpers import decoded_fixture

@@ -105,9 +105,40 @@ def check_metadata(metadata: dict) -> None:
     }.items():
         if metadata.get(field) != expected:
             raise MagicError(f"Independent app {field} does not match {expected!r}.")
-    if set(metadata.get("permissions", [])) != PERMISSIONS:
+    # aapt2 includes READ_EXTERNAL_STORAGE as both uses-permission and
+    # uses-implied-permission when legacy WRITE_EXTERNAL_STORAGE is present.
+    # Accept only that documented implication, with the same Android 9 cap.
+    legacy_read = "android.permission.READ_EXTERNAL_STORAGE"
+    names = metadata.get("permissions", [])
+    expected = PERMISSIONS | ({legacy_read} if legacy_read in names else set())
+    details = metadata.get("permission_details", [])
+    expected_details = [
+        {
+            "name": name,
+            "max_sdk": "28" if name.endswith("_EXTERNAL_STORAGE") else None,
+        }
+        for name in expected
+    ]
+    implied = (
+        [
+            {
+                "name": legacy_read,
+                "max_sdk": "28",
+                "reason": "requested WRITE_EXTERNAL_STORAGE",
+            }
+        ]
+        if legacy_read in names
+        else []
+    )
+    if (
+        set(names) != expected
+        or len(names) != len(expected)
+        or sorted(details, key=lambda item: str(item.get("name")))
+        != sorted(expected_details, key=lambda item: item["name"])
+        or metadata.get("implied_permissions", []) != implied
+    ):
         raise MagicError(
-            "Unexpected application permissions; no network/cloud permissions are allowed."
+            "Unexpected application permissions or legacy storage limits; no network/cloud permissions are allowed."
         )
     if metadata.get("launchable_activity") != APP_ID + ".MainActivity":
         raise MagicError("Unexpected launcher activity.")
