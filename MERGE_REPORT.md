@@ -44,15 +44,21 @@ README already stated. They are not part of the APK.
 | Python cross-check of the cube sampler (`/tmp/devkit/sample_contract.py`, dev-only) | trilinear sampling matches `camera_magic.lut.grade()` within 3/255 | local run |
 | `camera_magic app-luts --check` (assets are reproducible) | pass | CI (`validate.yml`, `camera-app.yml`) |
 | Gradle `assembleDebug`, `assembleRelease`, `assembleDebugAndroidTest`, `lintDebug`, `lintRelease` | **BUILD SUCCESSFUL** | CI run on this branch |
-| JVM unit tests (cube parser, sampler, domain, matrix, tuning) | **40 pass** | CI `testDebugUnitTest` |
+| JVM unit tests (cube parser, sampler, domain, CPU grade, camera lease, matrix, tuning) | **47 pass** | CI `testDebugUnitTest` |
 | Android Lint (abort on error) | clean | CI `lintDebug` / `lintRelease` |
 | Emulator API 35 (x86_64): 6/6 instrumented tests | **pass** | run [43907626417](https://github.com/m777m44/Camera-magic/actions/runs/43907626417) `camera-device (35, x86_64)` |
 | Emulator API 23 (x86): 6/6 instrumented tests | **pass** | same run, `camera-device (23, x86)` |
 | Emulator: preview, on-device `.cube` parse + atlas, still saved with a look, MP4/AAC recorded and decoded, pause/resume, recreate | **pass** (both APIs) | `CameraRecordingTest` (3), `LookPipelineTest` (3) |
 | Physical phone, real sensor, colour accuracy | **Not tested** | no device available here |
 
-The last run on this branch, `Mahdi Camera app validation` #43907626417 on commit `f0dfeec`,
-is **fully green**: build, unit tests, both lint variants and both emulator jobs. Evidence
+The latest run on this branch, `Mahdi Camera app validation`
+[#43914689554](https://github.com/m777m44/Camera-magic/actions/runs/43914689554), is
+**fully green**: build, 47 JVM unit tests, both lint variants and both emulator jobs. The
+same commit's instrumented suite passed 6/6 on API 23 and API 35 there and on
+[#43907626417](https://github.com/m777m44/Camera-magic/actions/runs/43907626417). An earlier
+main run lost its API 23 emulator mid-suite ("System has crashed", 0 of 6 tests received);
+each instrumented test now retries once so an emulator crash is never reported as a camera
+bug. Evidence
 files (`live-camera.png`, `look-still-noir.jpg`, `look-still-neutral.jpg`,
 `emulator-recording.mp4`) are uploaded as the `mahdi-camera-real-emulator-api-*` artifacts
 of that run.

@@ -39,9 +39,7 @@ public final class CameraEngine {
     // deadline, not a flag: if the owning engine's thread dies before onClosed (a stopped
     // Activity, a crashed main thread) the lease must expire, or every later camera open on
     // the process would fail with "Camera is still closing".
-    private static final java.util.concurrent.atomic.AtomicLong LEASE_UNTIL =
-            new java.util.concurrent.atomic.AtomicLong(0L);
-    private static final long LEASE_MS = 4000L;
+    private static final CameraLease CAMERA_LEASE = new CameraLease();
 
     interface Listener {
         void capabilities(Capabilities capabilities);
@@ -277,8 +275,7 @@ public final class CameraEngine {
             fail("Camera permission is required."); return;
         }
         long now = android.os.SystemClock.elapsedRealtime();
-        long until = LEASE_UNTIL.get();
-        if (until > now && !holdsCameraLease) {
+        if (CAMERA_LEASE.isHeldByAnother(now) && !holdsCameraLease) {
             // Another engine is genuinely still closing its device. Legacy HAL shutdown can
             // take seconds; a short owned lease keeps that wait bounded either way.
             if (leaseDeadline == 0) leaseDeadline = now + 15000;
@@ -290,8 +287,8 @@ public final class CameraEngine {
             return;
         }
         if (!holdsCameraLease) {
-            LEASE_UNTIL.set(now + LEASE_MS);
-            Log.i(TAG, "Camera lease acquired");
+            CAMERA_LEASE.acquire(now, false);
+            Log.i(TAG, "Camera lease acquired until " + CAMERA_LEASE.heldUntil());
         }
         holdsCameraLease = true; leaseDeadline = 0;
         try {
@@ -950,7 +947,7 @@ public final class CameraEngine {
     }
 
     private void releaseCameraLease() {
-        if (holdsCameraLease) { holdsCameraLease = false; LEASE_UNTIL.set(0L); }
+        if (holdsCameraLease) { holdsCameraLease = false; CAMERA_LEASE.release(true); }
     }
 
     private void closeDevice(CameraDevice device) {

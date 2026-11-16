@@ -96,12 +96,13 @@ python -m camera_magic app-luts --check
 python scripts/check_java_syntax.py
 ```
 
-اختبارات وحدة Java تعمل داخل `:camera-app:testDebugUnitTest` (**40 اختبارًا**): عقد محلّل
+اختبارات وحدة Java تعمل داخل `:camera-app:testDebugUnitTest` (**47 اختبارًا**): عقد محلّل
 `.cube`، وأخذ العيّنات trilinear ونطاق `DOMAIN`، ومصفوفة الاتجاه (90° و180° والكاميرا
 الأمامية)، وتلميح دوران المسجّل، وعدم قابلية تعديل `Tuning`. أما اختبارات الأجهزة الستة
 فتمرّ بالكامل على محاكي API 23 وAPI 35 (run
-[43907626417](https://github.com/m777m44/Camera-magic/actions/runs/43907626417)):
-دورة حياة المعاينة، والخلفية/الاستئناف، وإعادة إنشاء الواجهة، وستة looks مدمجة، ومحلّل
+[43914689554](https://github.com/m777m44/Camera-magic/actions/runs/43914689554) وrun
+[43907626417](https://github.com/m777m44/Camera-magic/actions/runs/43907626417)): دورة حياة
+المعاينة، والخلفية/الاستئناف، وإعادة إنشاء الواجهة، وستة looks مدمجة، ومحلّل
 `.cube` على الجهاز، وصورة محفوظة بـNoir تتحقق فعلاً من انخفاض التشبع، ومقطع MP4 مفكوك
 بعينتي H.264 وAAC. هذه نتائج محاكي فقط: لا تُثبت جودة صورة أو توافقًا مع أجهزة
 Xiaomi/Huawei/Samsung الحقيقية.
