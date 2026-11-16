@@ -154,8 +154,7 @@ public class LookPipelineTest {
             }
         } finally {
             if (photo != null) photo.recycle();
-            // The saved entry is removed only if the test obtained one.
-            Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+            // Never leave a test photo behind in the emulator's gallery.
             android.database.Cursor cursor = context.getContentResolver().query(
                     android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                     new String[]{android.provider.MediaStore.Images.Media._ID},
