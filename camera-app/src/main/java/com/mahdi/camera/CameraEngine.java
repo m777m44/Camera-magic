@@ -177,7 +177,7 @@ public final class CameraEngine {
     private CameraDevice closingCamera;
     private boolean shuttingDown;
     private boolean holdsCameraLease;
-    private int leaseAttempts;
+    private long leaseDeadline;
 
     CameraEngine(Context context, Listener listener) {
         this.context = context.getApplicationContext(); this.listener = listener;
@@ -245,11 +245,18 @@ public final class CameraEngine {
             fail("Camera permission is required."); return;
         }
         if (!CAMERA_LEASE.tryAcquire()) {
-            if (++leaseAttempts <= 30) worker.postDelayed(this::openCamera, 100);
-            else { active = false; fail("Camera is still closing. Tap the preview to retry."); }
+            // Legacy HAL shutdown can legitimately take several seconds. Use a
+            // bounded wall-clock deadline, not a retry count consumed by queued resumes.
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (leaseDeadline == 0) leaseDeadline = now + 15000;
+            if (now < leaseDeadline) worker.postDelayed(this::openCamera, 100);
+            else {
+                active = false; leaseDeadline = 0;
+                fail("Camera is still closing. Tap the preview to retry.");
+            }
             return;
         }
-        holdsCameraLease = true; leaseAttempts = 0;
+        holdsCameraLease = true; leaseDeadline = 0;
         try {
             String[] ids = manager.getCameraIdList();
             if (ids.length == 0) throw new IOException("No cameras were reported by Android.");
@@ -536,7 +543,7 @@ public final class CameraEngine {
     }
 
     private void closeCamera() {
-        ++generation; leaseAttempts = 0;
+        ++generation; leaseDeadline = 0;
         // Do not clear opening: an outstanding open must return and be closed
         // before the next resume/lens/size request may open another device.
         stopRecordingInternal(false);
