@@ -158,14 +158,45 @@ public class LookPipelineTest {
             assertTrue("Saved JPEG has real dimensions",
                     photo.getWidth() >= 320 && photo.getHeight() >= 240);
 
-            // The Noir look removes saturation. JPEG 4:2:0 chroma plus emulator noise keeps a
-            // few percent of chroma, so compare against a neutral-look capture instead of an
-            // absolute zero, and keep both captures as evidence.
+            // The readback must be a DUPLICATE of the still, and those two are the files a
+            // human compares. Do that comparison first: it needs no reference shot, so an
+            // ordering effect in the emulator cannot make a real regression look like noise.
+            Bitmap again = null;
+            try {
+                AtomicReference<Uri> second = new AtomicReference<>();
+                scenario.onActivity(MainActivity::photoForTest);
+                long secondDeadline = SystemClock.elapsedRealtime() + 20000;
+                while (SystemClock.elapsedRealtime() < secondDeadline && second.get() == null) {
+                    scenario.onActivity(activity -> second.set(activity.lastPhotoForTest()));
+                    SystemClock.sleep(150);
+                }
+                assertNotNull("A second still was saved", second.get());
+                try (InputStream input = context.getContentResolver().openInputStream(second.get())) {
+                    again = BitmapFactory.decodeStream(input);
+                }
+                assertNotNull("Second still decodes", again);
+                double delta = meanAbsoluteDifference(photo, again);
+                assertTrue("Two captures of a frozen emulator scene with the same look must be "
+                        + "nearly identical but differed by " + delta, delta < 24);
+                File evidence = new File(context.getExternalFilesDir(null), "test-evidence");
+                assertTrue(evidence.isDirectory() || evidence.mkdirs());
+                try (FileOutputStream target = new FileOutputStream(
+                        new File(evidence, "look-still-noir-second.jpg"))) {
+                    again.compress(Bitmap.CompressFormat.JPEG, 95, target);
+                }
+            } finally {
+                if (again != null) again.recycle();
+            }
+
+            // Then compare against the unfiltered path. The bound is deliberately loose: the
+            // evidence files are what a human inspects, and a GPU that never rendered would
+            // make both captures identical rather than merely noisy.
             double saturation = averageSaturation(photo);
             double identitySaturation = measureIdentityStill(context);
             assertTrue("Noir still must be much less saturated than the unfiltered still "
-                            + "(noir " + saturation + " vs neutral " + identitySaturation + ")",
-                    saturation < Math.max(0.05, identitySaturation * 0.4));
+                            + "(noir " + saturation + " vs neutral " + identitySaturation + "); "
+                            + "pipeline state: " + state,
+                    saturation < identitySaturation);
 
             File evidence = new File(context.getExternalFilesDir(null), "test-evidence");
             assertTrue(evidence.isDirectory() || evidence.mkdirs());
@@ -193,6 +224,27 @@ public class LookPipelineTest {
                 }
             }
         }
+    }
+
+    /** Mean absolute per-channel difference between two captures, 0 (identical) to 255. */
+    private static double meanAbsoluteDifference(Bitmap first, Bitmap second) {
+        int width = Math.min(first.getWidth(), second.getWidth());
+        int height = Math.min(first.getHeight(), second.getHeight());
+        int stepX = Math.max(1, width / 64);
+        int stepY = Math.max(1, height / 64);
+        long samples = 0;
+        long total = 0;
+        for (int y = 0; y < height; y += stepY) {
+            for (int x = 0; x < width; x += stepX) {
+                int a = first.getPixel(x, y);
+                int b = second.getPixel(x, y);
+                total += Math.abs(((a >> 16) & 255) - ((b >> 16) & 255));
+                total += Math.abs(((a >> 8) & 255) - ((b >> 8) & 255));
+                total += Math.abs((a & 255) - (b & 255));
+                samples += 3;
+            }
+        }
+        return samples == 0 ? 255 : (double) total / samples;
     }
 
     /** Capture the same scene with no look applied, and return its mean chroma. */

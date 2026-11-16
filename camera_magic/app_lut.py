@@ -102,6 +102,12 @@ MANIFEST = {
 }
 
 
+# "Noir" is the bundled look the instrumented test grades a still with. A greyscale look
+# with zero saturation makes the check unambiguous: if the GPU path is bypassed, the saved
+# still keeps the emulator's colour chart instead of turning grey.
+NOIR_ID = "noir"
+
+
 def render_look(look: dict) -> bytes:
     """Render one look as an 8-bit RGB PNG atlas (tiles laid out left-to-right, top-to-bottom)."""
     size, tiles = LUT_SIZE, TILES
