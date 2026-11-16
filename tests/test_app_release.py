@@ -270,6 +270,11 @@ class AppReleaseTests(unittest.TestCase):
         self.assertNotIn("pull_request_target", workflow["on"])
         condition = workflow["jobs"]["preview"]["if"]
         self.assertIn("head_repository.full_name == github.repository", condition)
+        self.assertIn("refs/heads/main", condition)
+        # It must gate on the compile/unit-test/lint job, and must not be gated on the
+        # emulator jobs, which fail for infrastructure reasons on shared runners.
+        self.assertNotIn("workflow_run.conclusion == 'success'", condition)
+        self.assertIn('select(.name == "build")', text)
         # Look at the actual gh commands: comments and notes may name the release link, but
         # no upload may claim the Latest slot or publish under the release asset name.
         commands = [
