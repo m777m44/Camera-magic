@@ -40,3 +40,18 @@ updated to match.
   the Android SDK terms and are not redistributed here.
 * No Blackmagic Design code, artwork, fonts, trademarks, services or APKs are included. The
   app is not affiliated with Blackmagic Design.
+
+## Files added in the LOOK/stills stage
+
+All original to this repository, written from the public `.cube` file-format
+description and the published behaviour of a 3D LUT — no upstream source file was
+copied, ported or paraphrased:
+
+| File | What it is |
+|---|---|
+| `camera-app/src/main/java/com/mahdi/camera/lut/CubeLut.java` | `.cube` parser, atlas packing, trilinear sampler |
+| `camera-app/src/main/java/com/mahdi/camera/lut/LookGrade.java` | CPU still grading with the same cube |
+| `camera-app/src/main/java/com/mahdi/camera/lut/LutCatalog.java` | Bundled and imported look catalogue |
+| `camera-app/src/main/java/com/mahdi/camera/lut/LutRenderer.java`, `GlProgram.java` | GLES 2.0 renderer and shader plumbing |
+| `camera-app/src/main/java/com/mahdi/camera/GlPipeline.java`, `Tuning.java`, `PhotoStore.java` | Pipeline, tuning model, JPEG storage |
+| `camera-app/src/main/assets/mahdi_lut/**` | Generated in-repo by `camera_magic/app_lut.py` |
