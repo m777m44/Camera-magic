@@ -120,8 +120,9 @@ public class LookPipelineTest {
                 assertNotNull("bundled noir look", noir);
                 activity.applyLookForTest(noir, 1f);
             });
-            // Wait for the renderer to actually grade a frame, then record its state so a
-            // failure says whether this was a GPU problem or a look problem.
+            // Record what the GPU path actually did. The still is graded on the CPU from the
+            // same cube, so the photo assertion holds on every GPU; the preview only filters
+            // on the GPU where frames arrive, and the engine falls back otherwise.
             long renderDeadline = SystemClock.elapsedRealtime() + 15000;
             String state = "";
             while (SystemClock.elapsedRealtime() < renderDeadline) {
@@ -130,17 +131,10 @@ public class LookPipelineTest {
                 if (state != null && state.contains("frames=") && !state.contains("frames=0")) break;
                 SystemClock.sleep(150);
             }
-            boolean graded = state != null && state.contains("look=true")
-                    && !state.contains("strength=0%");
-            if (!graded) {
-                // The camera is designed to fall back rather than show a black preview, so on a
-                // GPU that never delivers frames this test checks the fallback instead.
-                System.out.println("LOOK-FALLBACK: " + state);
-                assertTrue("A fallback must leave a working preview", engine.isPreviewReady());
-                return;
-            }
-            assertTrue("The GPU pipeline must have rendered a frame (" + state + ")",
-                    !state.contains("frames=0") || state.contains("frames=1"));
+            boolean gpuFrames = state != null && !state.contains("frames=0");
+            System.out.println("LOOK-STATE: " + state + " gpuFrames=" + gpuFrames);
+            assertTrue("The look selection must reach the renderer (" + state + ")",
+                    state != null && state.contains("look=true"));
             SystemClock.sleep(500);
 
             AtomicReference<Uri> saved = new AtomicReference<>();

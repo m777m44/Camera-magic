@@ -81,7 +81,28 @@ public final class LutCatalog {
         }
 
         public void recycle() {
-            if (!bitmap.isRecycled()) bitmap.recycle();
+            if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+        }
+
+        /** CPU-gradable cube, so a saved still keeps exactly the previewed look. */
+        public CubeLut cube() {
+            int side = Math.round(size);
+            if (bitmap == null || side < CubeLut.MIN_SIZE || side > CubeLut.MAX_SIZE) return null;
+            if (bitmap.getWidth() != side * side || bitmap.getHeight() != side) return null;
+            int[] pixels = new int[side * side * side];
+            bitmap.getPixels(pixels, 0, side * side, 0, 0, side * side, side);
+            for (int index = 0; index < pixels.length; index++) {
+                int pixel = pixels[index];
+                // getPixels returns alpha-premultiplied colour; the cube is opaque.
+                int alpha = (pixel >>> 24) & 255;
+                if (alpha == 0 || alpha == 255) { pixels[index] = pixel | 0xFF000000; continue; }
+                int red = Math.min(255, (pixel >> 16 & 255) * 255 / alpha);
+                int green = Math.min(255, (pixel >> 8 & 255) * 255 / alpha);
+                int blue = Math.min(255, (pixel & 255) * 255 / alpha);
+                pixels[index] = 0xFF000000 | (red << 16) | (green << 8) | blue;
+            }
+            return CubeLut.fromPixels(pixels, side, domainMin[0], domainMax[0],
+                    domainMin[1], domainMax[1], domainMin[2], domainMax[2]);
         }
     }
 

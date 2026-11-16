@@ -114,6 +114,57 @@ public class CubeLutTest {
         assertTrue("different data must change the digest", !a.digest().equals(c.digest()));
     }
 
+    @Test public void sampleIsTheIdentityForAnIdentityCube() throws Exception {
+        CubeLut identity = CubeLut.identity();
+        for (float value : new float[]{0f, 0.25f, 0.5f, 0.75f, 1f}) {
+            int packed = identity.sample(value, value, value);
+            int grey = (packed >> 16) & 255;
+            assertEquals(0xFF000000, packed & 0xFF000000);
+            assertEquals("grey " + value, Math.round(value * 255), grey, 1);
+            assertEquals(grey, (packed >> 8) & 255);
+            assertEquals(grey, packed & 255);
+        }
+    }
+
+    @Test public void sampleClampsOutOfRangeInputsInsteadOfWrapping() throws Exception {
+        CubeLut identity = CubeLut.identity();
+        assertEquals(0xFF000000, identity.sample(-2f, -0.5f, -0f));
+        assertEquals(0xFFFFFFFF, identity.sample(4f, 2f, 1f));
+    }
+
+    @Test public void sampleNormalisesTheCubeDomainLikeTheShader() throws Exception {
+        // An identity cube declared over 0..2 must still map 0..1 as the shader does:
+        // normalise with the domain, then sample the same table.
+        CubeLut lut = CubeLut.parse(cube(2, "LUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 2 2 2\n"));
+        assertEquals(0xFF000000, lut.sample(0f, 0f, 0f));
+        int packed = lut.sample(1f, 1f, 1f);
+        assertEquals(128, (packed >> 16) & 255, 2);
+    }
+
+    @Test public void fromPixelsRebuildsTheSameTableAsAParsedCube() throws Exception {
+        CubeLut parsed = CubeLut.parse(cube(3, "LUT_3D_SIZE 3\n"));
+        CubeLut rebuilt = CubeLut.fromPixels(parsed.toAtlasPixels(), parsed.size,
+                0f, 1f, 0f, 1f, 0f, 1f);
+        assertEquals(parsed.size, rebuilt.size);
+        for (float red = 0f; red <= 1f; red += 0.125f) {
+            for (float green = 0f; green <= 1f; green += 0.125f) {
+                for (float blue = 0f; blue <= 1f; blue += 0.125f) {
+                    assertEquals(parsed.sample(red, green, blue),
+                            rebuilt.sample(red, green, blue));
+                }
+            }
+        }
+    }
+
+    @Test public void fromPixelsRejectsAWrongLengthAtlas() {
+        try {
+            CubeLut.fromPixels(new int[7], 2, 0f, 1f, 0f, 1f, 0f, 1f);
+            fail("Expected a mismatched atlas to be rejected");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("size"));
+        }
+    }
+
     private static void expectRejected(String text, String expectedWord) {
         try {
             CubeLut.parse(text);

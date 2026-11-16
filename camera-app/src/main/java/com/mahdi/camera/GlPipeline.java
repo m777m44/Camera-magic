@@ -247,6 +247,29 @@ final class GlPipeline {
         }
     }
 
+    /**
+     * The cube the preview is grading with plus its strength, or {@code null} when no look is
+     * active. The still path uses it to grade the sensor JPEG on the CPU with the same table,
+     * so a photo matches the preview even where the GPU never receives camera frames.
+     */
+    com.mahdi.camera.lut.LookGrade stillGrade() {
+        Tuning current = state.tuning;
+        if (current == null || current.look == null || current.strength <= 0f) return null;
+        try {
+            LutCatalog.Atlas atlas = LutCatalog.load(context.getAssets(), current.look);
+            try {
+                com.mahdi.camera.lut.CubeLut cube = atlas.cube();
+                if (cube == null) return null;
+                return new com.mahdi.camera.lut.LookGrade(cube, current.strength);
+            } finally {
+                atlas.recycle();
+            }
+        } catch (java.io.IOException | RuntimeException error) {
+            Log.w(TAG, "Cannot grade a still with this look: " + error.getMessage());
+            return null;
+        }
+    }
+
     /** Read back the last filtered frame for a still photo. Blocking; call off the UI thread. */
     Bitmap captureFrame() {
         LutRenderer current = renderer;

@@ -96,6 +96,105 @@ public final class CubeLut {
         }
     }
 
+    /**
+     * Trilinear lookup for the CPU still path and for unit tests.
+     *
+     * <p>Inputs are display-referred 0..1 RGB; the cube's own input range and domain are
+     * applied first, exactly as the shader does. Returns packed 0xFFRRGGBB.
+     */
+    public int sample(float red, float green, float blue) {
+        float r = normaliseInput(red, minValue, maxValue);
+        float g = normaliseInput(green, minValue, maxValue);
+        float b = normaliseInput(blue, minValue, maxValue);
+        // DOMAIN_MIN/MAX describe the colour space the cube covers, exactly as the shader
+        // normalises with them: they map a colour to its atlas coordinate, not the reverse.
+        return trilinear(
+                clamp01((r - domainMin[0]) / (domainMax[0] - domainMin[0])),
+                clamp01((g - domainMin[1]) / (domainMax[1] - domainMin[1])),
+                clamp01((b - domainMin[2]) / (domainMax[2] - domainMin[2])));
+    }
+
+    /** Copy of the packed atlas, for tests and for the CPU still path. */
+    public int[] toAtlasPixels() {
+        return argb.clone();
+    }
+
+    /**
+     * Rebuild a cube from an already-decoded atlas (a PNG LUT or
+     * {@link LutCatalog.Atlas#cube()}). The atlas is the same square layout the shader
+     * samples, so the CPU result matches the preview.
+     */
+    public static CubeLut fromPixels(int[] atlas, int size, float domainMinRed,
+                                     float domainMaxRed, float domainMinGreen,
+                                     float domainMaxGreen, float domainMinBlue,
+                                     float domainMaxBlue) {
+        if (size < MIN_SIZE || size > MAX_SIZE || atlas == null
+                || atlas.length != size * size * size) {
+            throw new IllegalArgumentException("An atlas must hold size³ pixels");
+        }
+        for (int index = 0; index < atlas.length; index++) atlas[index] |= 0xFF000000;
+        return new CubeLut(null, size, atlas.clone(),
+                new float[]{domainMinRed, domainMinGreen, domainMinBlue},
+                new float[]{domainMaxRed, domainMaxGreen, domainMaxBlue}, 0f, 1f);
+    }
+
+    /** Same interpolation the fragment shader gets from bilinear filtering plus a blue mix. */
+    private int trilinear(float r, float g, float b) {
+        float scale = size - 1;
+        float blue = clamp01(b) * scale;
+        int lower = Math.min((int) Math.floor(blue), size - 1);
+        int upper = Math.min(lower + 1, size - 1);
+        int[] below = plane(lower, r, g, scale);
+        int[] above = plane(upper, r, g, scale);
+        float mix = blue - lower;
+        int red = Math.round(below[0] + (above[0] - below[0]) * mix);
+        int green = Math.round(below[1] + (above[1] - below[1]) * mix);
+        int blueOut = Math.round(below[2] + (above[2] - below[2]) * mix);
+        return 0xFF000000 | (clamp255(red) << 16) | (clamp255(green) << 8) | clamp255(blueOut);
+    }
+
+    /** Bilinear interpolate one blue slice, returning the packed RGB components. */
+    private int[] plane(int slice, float r, float g, float scale) {
+        float green = clamp01(g) * scale;
+        int lowerY = Math.min((int) Math.floor(green), size - 1);
+        int upperY = Math.min(lowerY + 1, size - 1);
+        int[] low = row(slice, lowerY, r, scale);
+        int[] high = row(slice, upperY, r, scale);
+        float mix = green - lowerY;
+        return new int[]{
+                Math.round(low[0] + (high[0] - low[0]) * mix),
+                Math.round(low[1] + (high[1] - low[1]) * mix),
+                Math.round(low[2] + (high[2] - low[2]) * mix)};
+    }
+
+    /** Linear interpolate one atlas row. */
+    private int[] row(int slice, int y, float r, float scale) {
+        float red = clamp01(r) * scale;
+        int lowerX = Math.min((int) Math.floor(red), size - 1);
+        int upperX = Math.min(lowerX + 1, size - 1);
+        float mix = red - lowerX;
+        int left = argb[(slice * size + y) * size + lowerX];
+        int right = argb[(slice * size + y) * size + upperX];
+        return new int[]{
+                Math.round(((left >> 16) & 255) + (((right >> 16 & 255) - (left >> 16 & 255)) * mix)),
+                Math.round(((left >> 8) & 255) + (((right >> 8 & 255) - (left >> 8 & 255)) * mix)),
+                Math.round((left & 255) + (((right & 255) - (left & 255)) * mix))};
+    }
+
+    private static int clamp255(int value) {
+        return value < 0 ? 0 : (value > 255 ? 255 : value);
+    }
+
+    private static float clamp01(float value) {
+        return value < 0f ? 0f : (value > 1f ? 1f : value);
+    }
+
+    private static float normaliseInput(float value, float min, float max) {
+        if (Float.isNaN(value)) return 0f;
+        float t = (value - min) / (max - min);
+        return t < 0f ? 0f : (t > 1f ? 1f : t);
+    }
+
     public float domainMin(int channel) { return domainMin[channel]; }
     public float domainMax(int channel) { return domainMax[channel]; }
     public float minValue() { return minValue; }

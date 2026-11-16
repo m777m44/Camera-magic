@@ -698,7 +698,15 @@ public final class CameraEngine {
                 image.close();
                 image = null;
                 busy = false;
-                Uri uri = PhotoStore.saveJpegBytes(context, jpeg);
+                // Grade the sensor JPEG with the previewed cube on the CPU, so the photo keeps
+                // the look even when the GPU path has not delivered a frame on this device.
+                byte[] toSave = jpeg;
+                com.mahdi.camera.lut.LookGrade grade = gl == null ? null : gl.stillGrade();
+                if (grade != null) {
+                    byte[] graded = gradeJpeg(jpeg, grade);
+                    if (graded != null) toSave = graded;
+                }
+                Uri uri = PhotoStore.saveJpegBytes(context, toSave);
                 closeStillReader();
                 if (active && camera != null) createPreview();
                 main.post(() -> listener.photo(uri, null));
@@ -772,6 +780,25 @@ public final class CameraEngine {
         if (stillReader != null) {
             stillReader.close();
             stillReader = null;
+        }
+    }
+
+    /** Decode, grade and re-encode a JPEG; {@code null} when it cannot be decoded. */
+    private byte[] gradeJpeg(byte[] jpeg, com.mahdi.camera.lut.LookGrade grade) {
+        Bitmap decoded = android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
+        if (decoded == null) return null;
+        Bitmap graded = null;
+        try {
+            graded = grade.apply(decoded);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            if (!graded.compress(Bitmap.CompressFormat.JPEG, 95, out)) return null;
+            return out.toByteArray();
+        } catch (RuntimeException | OutOfMemoryError error) {
+            Log.w(TAG, "Could not grade the still: " + error.getMessage());
+            return null;
+        } finally {
+            if (graded != null) graded.recycle();
+            decoded.recycle();
         }
     }
 
