@@ -17,6 +17,23 @@ https://github.com/m777m44/Camera-magic/releases/latest/download/Mahdi_Camera.ap
 على نجاح نشر؛ راجع أصول الإصدار الفعلية. البناء أو التوقيع الفاشل لا يستبدل آخر APK ناجح.
 الرابط القديم `Blackmagic_Camera_Mahdi.apk` يخص المسار السابق، وليس هذا التطبيق المستقل.
 
+**الحالة الآن (2026-11-16):** لا يوجد إصدار موقّع منشور بعد، لأن سير عمل النشر يحتاج
+المفتاح الخاص (`MAHDI_APP_KEYSTORE_B64` وبقية الأسرار). لذلك يعيد رابط `latest` أعلاه
+404 مؤقتًا.
+
+### نسخة تجريبية قابلة للتثبيت الآن
+
+```text
+https://github.com/m777m44/Camera-magic/releases/download/preview/Mahdi_Camera-preview.apk
+```
+
+بناء **debug** من `main`، يُنشأ تلقائيًا بعد كل تشغيل ناجح للاختبارات على API 23 و35:
+
+- إنه ليس الإصدار الموقّع، وشهادته شهادة debug.
+- لا يمكن تحديثه بإصدار موقّع (الشهادتان مختلفتان)، فاحذفه قبل تثبيت الإصدار الرسمي.
+- التثبيت: `adb install -r Mahdi_Camera-preview.apk`
+- التحقق: `SHA256SUMS-preview.txt` و`certificate.txt` بنفس الإصدار.
+
 ## الوظائف المنفذة
 
 - **LOOK**: تطبيق 3D colour cube على GPU على **المعاينة والتسجيل والصورة معًا** من نفس
