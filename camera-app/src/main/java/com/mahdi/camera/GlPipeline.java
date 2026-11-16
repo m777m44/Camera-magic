@@ -69,7 +69,7 @@ final class GlPipeline {
         return state.failed;
     }
 
-    /** True once at least one graded frame has been rendered. */
+    /** True once at least one graded frame has been rendered. Safe from any thread. */
     boolean hasFrame() {
         LutRenderer current = renderer;
         return current != null && current.hasFrame();

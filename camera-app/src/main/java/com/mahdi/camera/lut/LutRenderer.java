@@ -93,7 +93,7 @@ public final class LutRenderer implements AutoCloseable {
     private float[] pendingTransform;
     private final float[] inputTransform = new float[16];
     private long lastTimestamp = Long.MIN_VALUE;
-    private boolean hasFrame;
+    private volatile boolean hasFrame;
     private boolean failed;
     private volatile boolean closed;
     private long frameCount;
@@ -388,8 +388,8 @@ public final class LutRenderer implements AutoCloseable {
             GLES20.glUniform1f(lutProgram.uniform("uVignette"), vignette);
             draw(lutProgram);
             checkGl("process frame");
-            hasFrame = true;
             frameCount++;
+            hasFrame = true;
 
             // Pass 3: identical processed texture for both consumers.
             if (previewSurface != EGL14.EGL_NO_SURFACE) {

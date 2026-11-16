@@ -72,12 +72,22 @@ public final class CubeLut {
      * Atlas layout: the 3D cube is written as {@code size} tiles of {@code size × size},
      * laid out {@code size} per row, left to right and top to bottom, one slice per blue
      * value. This matches the shader in {@code assets/mahdi_lut/shaders/lut.frag}.
+     *
+     * <p>A large cube (33³ = a 1089 px atlas, 64³ = 4096 px) is allocated through
+     * {@code Bitmap.createBitmap(int[], ...)}, which needs a live graphics buffer rather than
+     * a renderscript-free CPU array, so an {@link OutOfMemoryError} is reported as a normal
+     * import failure instead of crashing the camera.
      */
     public Bitmap toAtlas() {
         if (atlasSize * atlasSize != argb.length) {
             throw new IllegalStateException("Corrupt atlas buffer");
         }
-        return Bitmap.createBitmap(argb, atlasSize, atlasSize, Bitmap.Config.ARGB_8888);
+        try {
+            return Bitmap.createBitmap(argb, atlasSize, atlasSize, Bitmap.Config.ARGB_8888);
+        } catch (OutOfMemoryError error) {
+            throw new IllegalStateException("This LUT is too large for this device: "
+                    + atlasSize + "×" + atlasSize + " atlas");
+        }
     }
 
     public float domainMin(int channel) { return domainMin[channel]; }

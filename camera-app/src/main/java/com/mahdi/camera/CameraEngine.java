@@ -706,8 +706,8 @@ public final class CameraEngine {
                         }, worker);
                     } catch (CameraAccessException | RuntimeException error) {
                         busy = false;
+                        closeSession();
                         photoFailed("Still capture failed: " + error.getMessage());
-                        closeStillReader();
                         if (active && camera != null) createPreview();
                     }
                 }
@@ -771,7 +771,9 @@ public final class CameraEngine {
     private long lastFrameNanos() { return gl == null ? 0L : gl.lastFrameNanos(); }
 
     private void recordingFailed(Exception e) {
-        closeSession(); releaseRecorder();
+        closeSession();
+        if (lookRendering && gl != null) gl.setEncoderSurface(null, 0L);
+        releaseRecorder();
         if (output != null) { output.discard(); output = null; }
         isRecording = false; busy = false;
         main.post(() -> listener.recording(false));
