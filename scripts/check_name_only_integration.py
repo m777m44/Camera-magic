@@ -25,7 +25,7 @@ def main():
     # Ephemeral key ONLY for a synthetic CI round trip; never reused by the release workflow.
     os.environ["FIXTURE_STORE_PASSWORD"] = secrets.token_urlsafe(24)
     os.environ["FIXTURE_KEY_PASSWORD"] = secrets.token_urlsafe(24)
-    tools = Tools()
+    tools = Tools(ROOT / "config/release-toolchain.json")
     key = directory / "fixture.jks"
     try:
         create_key(

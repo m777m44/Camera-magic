@@ -51,7 +51,7 @@ jobs:
           mkdir -p work
           {
             java -version
-            sdkmanager "platforms;android-35" "build-tools;35.0.0"
+            sdkmanager "platforms;android-35" "build-tools;35.0.0" "build-tools;36.0.0"
             gradle --no-daemon :hdr-kit:assembleDebug :hdr-kit:assembleDebugAndroidTest :hdr-kit:lintDebug
           } 2>&1 | tee work/android-validation.log
       - uses: actions/setup-python@v7.1.0

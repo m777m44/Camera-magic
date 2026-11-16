@@ -14,6 +14,9 @@
 - Reserved a stable Latest asset name: `Blackmagic_Camera_Mahdi.apk`.
 - Added source-policy unit tests and a real toolchain rename/sign round trip using
   only the repository's original test APK, never a substitute Blackmagic app.
+- Support modern `minSdkVersion` and legacy `sdkVersion` badging output, stage an
+  owned aapt2 copy so Apktool does not chmod a system-owned SDK, and explicitly
+  select the same Build-Tools 36.0.0 in validation and release builds.
 
 No original Blackmagic APK or production signing material has been provided.
 Publication remains disabled until an authorized source and persistent signing

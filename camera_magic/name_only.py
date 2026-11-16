@@ -224,7 +224,7 @@ def rename_apk(
                 "--frame-path",
                 str(frameworks),
                 "--aapt",
-                tools.sdk_tool("aapt2"),
+                tools.apktool_aapt2(stage / "aapt-tool"),
                 "--output",
                 str(unsigned),
                 str(decoded),

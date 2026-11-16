@@ -114,9 +114,9 @@ def build(decoded: Path, output: Path, tools: Tools) -> dict:
     if missing_exported(root):
         raise MagicError("Exported-policy review is required before rebuilding.")
     tools.check_apktool()
-    aapt2 = tools.sdk_tool("aapt2")
     with tempfile.TemporaryDirectory(prefix=".mahdi-build-", dir=output.parent) as stage:
         apk = Path(stage) / "unsigned.apk"
+        aapt2 = tools.apktool_aapt2(Path(stage) / "aapt-tool")
         result = run(
             tools.apktool()
             + [

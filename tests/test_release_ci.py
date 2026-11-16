@@ -53,7 +53,9 @@ class ReleaseTests(unittest.TestCase):
             "http://example.com/a",
             "file:///etc/passwd",
             "https://user:pass@example.com/a",
+            "https://@example.com/a",
             "https://example.com/a#fragment",
+            "https://[broken/private?secret=test-only",
         ):
             with self.subTest(value=value), self.assertRaises(MagicError):
                 validate_url(value)
@@ -96,6 +98,15 @@ class ReleaseTests(unittest.TestCase):
     def test_network_error_does_not_log_secret_source_url(self, mocked):
         private_url = "https://example.com/private?token=do-not-print-this-test-token"
         mocked.return_value.open.side_effect = urllib.error.URLError(private_url)
+        with patch.dict(os.environ, {"APK_SOURCE_URL": private_url, "APK_SOURCE_SHA256": "a" * 64}):
+            with contextlib.redirect_stderr(io.StringIO()) as errors:
+                code = main(["prepare-source", "--output", str(self.root / "input.apk")])
+        self.assertEqual(2, code)
+        self.assertNotIn("do-not-print", errors.getvalue())
+        self.assertNotIn(private_url, errors.getvalue())
+
+    def test_malformed_url_errors_do_not_expose_secret_source(self):
+        private_url = "https://[invalid/private?token=do-not-print-this-test-token"
         with patch.dict(os.environ, {"APK_SOURCE_URL": private_url, "APK_SOURCE_SHA256": "a" * 64}):
             with contextlib.redirect_stderr(io.StringIO()) as errors:
                 code = main(["prepare-source", "--output", str(self.root / "input.apk")])
@@ -183,6 +194,7 @@ class ReleaseTests(unittest.TestCase):
         apk, report = self.release_fixture()
         for field, value in (
             ("apk_sha256", "a" * 64),
+            ("source_sha256", ""),
             ("filters_added", True),
             ("kind", "rebrand_only_signed"),
             ("sdk_changed", True),
@@ -209,6 +221,21 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("--draft=false --latest", text)
         self.assertIn('latest_main" != "$SOURCE_COMMIT', text)
         self.assertIn("releases/latest/download/" + ASSET_NAME, text)
+
+    def test_validation_and_release_explicitly_use_same_build_tools(self):
+        config = json.loads((ROOT / "config/release-toolchain.json").read_text())
+        for name in ("validate", "publish-apk"):
+            text = (ROOT / f".github/workflows/{name}.yml").read_text()
+            with self.subTest(workflow=name):
+                self.assertIn("build-tools;" + config["build_tools"], text)
+        self.assertIn(
+            "--tools config/release-toolchain.json",
+            (ROOT / ".github/workflows/publish-apk.yml").read_text(),
+        )
+        self.assertIn(
+            'Tools(ROOT / "config/release-toolchain.json")',
+            (ROOT / "scripts/check_name_only_integration.py").read_text(),
+        )
 
     def test_pinned_official_tool_metadata_present(self):
         config = json.loads((ROOT / "config/release-tools.json").read_text())

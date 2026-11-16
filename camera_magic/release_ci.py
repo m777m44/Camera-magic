@@ -146,8 +146,9 @@ def prepare_notes(directory: Path) -> None:
     (directory / "SHA256SUMS.txt").write_text(checksums, encoding="utf-8")
     (directory / "release-notes.md").write_text(
         "# Blackmagic Camera Mahdi — name-only rebuild\n\n"
-        "Only application/launcher display labels were changed. The input package ID, SDK and version "
-        "declarations, icons, DEX/native payload, permissions and assets were preserved and checked.\n\n"
+        "Only application/launcher display labels were intentionally edited; no icon or UI replacement "
+        "was made. The input package ID, SDK and version declarations, DEX/native payload, permissions "
+        "and assets were preserved and checked. Compiled resources and packaging were rebuilt.\n\n"
         "The APK has a new signing certificate. It is NOT an official Blackmagic release and cannot "
         "update an official installation signed by the publisher. Camera/recording functionality "
         "and device compatibility have not been tested by this workflow. No HDR filters were added.\n\n"

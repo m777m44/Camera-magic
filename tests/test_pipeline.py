@@ -37,6 +37,9 @@ class DummyTools:
     def sdk_tool(self, name):
         return name
 
+    def apktool_aapt2(self, directory):
+        return "aapt2"
+
 
 class PipelineTests(unittest.TestCase):
     def setUp(self):
