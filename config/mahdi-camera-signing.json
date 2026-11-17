@@ -1,10 +1,10 @@
 {
   "application_id": "com.mahdi.camera",
-  "certificate_sha256": "97f20c8334fa18c51f6005bbede2f96bc69b133ce9e9bf8202ef529ab1434e67",
+  "certificate_sha256": "c8da0ba565c0cde6b92fba8c046d50b01249870c81badaee973b1d4809bde599",
   "purpose": "Public certificate pin for Mahdi Camera updates. The private key is never committed; it must be backed up offline with its password or app updates become impossible.",
   "key_algorithm": "RSA 3072",
   "keystore_format": "JKS",
   "alias": "mahdi",
   "created": "2026-11-16",
-  "valid_until": "2054-04-03"
+  "valid_until": "2054-04-04"
 }

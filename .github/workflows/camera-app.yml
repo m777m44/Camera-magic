@@ -26,6 +26,9 @@ jobs:
       - name: Validate release policies and Java syntax
         run: |
           python -m pip install -r requirements-dev.txt
+          # Optional, independent JKS reader: the keystore cross-check test skips without it.
+          python -m pip install --no-deps pyjks==20.0.0 javaobj-py3 pyasn1 pyasn1-modules pycryptodomex \
+            || echo "pyjks unavailable; the keystore cross-check will skip"
           python -m unittest discover -q
           ruff check camera_magic tests scripts
           ruff format --check camera_magic tests scripts
