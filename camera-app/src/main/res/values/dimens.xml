@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="mahdi_gutter">16dp</dimen>
+    <dimen name="mahdi_chip_height">48dp</dimen>
+    <dimen name="mahdi_chip_radius">12dp</dimen>
+    <dimen name="mahdi_shutter_size">68dp</dimen>
+    <dimen name="mahdi_timer_height">30dp</dimen>
+    <dimen name="mahdi_status_height">32dp</dimen>
+    <dimen name="mahdi_guide_stroke">1dp</dimen>
+</resources>

@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Mahdi Camera</string>
+    <string name="grid_off">GRID OFF</string>
+    <string name="grid_thirds">GRID THIRDS</string>
+    <string name="grid_golden">GRID GOLDEN</string>
+    <string name="grid_cross">GRID CROSS</string>
 </resources>

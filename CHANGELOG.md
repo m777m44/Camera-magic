@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased — HDR bracket, live histogram, guides and an animated UI
+
+- **HDR bracket capture, fused on the device.** A new `BRACKET` chip captures 3, 5 or 7
+  exposures (±1, ±2 or ±3 EV) with real `CONTROL_AE_EXPOSURE_COMPENSATION` steps and merges
+  them into one JPEG with a weighted radiance merge (`HdrMerge`): mid-tones are trusted, a
+  pixel clipped in every frame falls back to the most usable exposure, and frames are decoded
+  one at a time at a shared ≤4 MP working size so a 12 MP set stays inside a normal heap.
+  `BracketPlan` orders the sequence centre-first so aborting still leaves a normally exposed
+  frame, and a failed merge saves that frame rather than inventing one. This is a multi-frame
+  merge in 8-bit sRGB — not sensor HDR, RAW or 10-bit, and the ABOUT text says so.
+- **Live luminance histogram with exposure advice.** `Histogram` computes Rec.601 luma, clipping
+  fractions, mean and zones; `HistogramView` draws it from the *graded* frame the GPU is
+  presenting, sampled four times a second only while it is switched on. `HdrMerge`,
+  `Histogram`, `BracketPlan`, `Level` and `Easing` are pure Java with 32 new JVM tests.
+- **Composition guides that are actually guides.** `GuidesView` gains a golden-ratio grid and a
+  centre-cross preset (the GRID chip cycles through four modes), a title-safe frame, and a
+  horizon level driven by the gravity sensor that animates toward the true tilt and locks
+  green when level. The sensor is registered only while the level is enabled.
+- **The UI moves like a camera, not like a settings screen.** Ripples and a scale nudge on
+  every chip, cross-faded label changes, a breathing REC pill and timer, a dip-and-release
+  shutter, a progress bar during a bracket sequence, and a soft cross-fade for the viewport
+  hint. Colours, dimens and strings moved into `res/values` so the Java UI and the theme share
+  one palette.
+
 ## Unreleased — signing key creation without a JDK, sturdier emulator job
 
 - **`scripts/create_release_key.py`** creates the release signing key in pure Python: a real
