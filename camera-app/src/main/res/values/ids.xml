@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Programmatic UI still needs stable tag keys; ids.xml gives them without layout XML. -->
+    <item name="mahdi_chip_active" type="id" />
+</resources>

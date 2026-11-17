@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- One palette, referenced by both the Java UI and the theme, so the app cannot drift
+         into two different shades of "almost the same" dark grey. -->
+    <color name="mahdi_background">#0B0F14</color>
+    <color name="mahdi_panel">#141C24</color>
+    <color name="mahdi_panel_high">#1B2630</color>
+    <color name="mahdi_stroke">#2B3A47</color>
+    <color name="mahdi_accent">#51D6C7</color>
+    <color name="mahdi_recording">#DE3949</color>
+    <color name="mahdi_recording_rim">#592530</color>
+    <color name="mahdi_text">#FFFFFF</color>
+    <color name="mahdi_text_muted">#94A5B4</color>
+    <color name="mahdi_text_faint">#5C6E7C</color>
+    <color name="mahdi_level_ok">#7BE3A1</color>
+    <color name="mahdi_level_warn">#F2C14E</color>
+</resources>

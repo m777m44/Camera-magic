@@ -92,8 +92,11 @@ Evidence: workflow `Mahdi Camera app validation` run
 | Look reaches the saved still | `passed`: the saved JPEG is measurably desaturated versus an unfiltered capture of the same scene | GPU-graded preview, because emulated GLES cannot create an EGL window surface here |
 | `.cube` import | `parsed on device` (`CubeLut.parse` + atlas allocation for a 9³ cube) | Large 33³/65³ cubes on a real device |
 | H.264 + AAC recorded and decodable | `passed`: MediaExtractor finds an `avc` video track and an `mp4a-latm` audio track, samples decode, duration > 1 s | Real sensor quality, 4K, 10-bit |
-| Manual ISO/shutter/WB/focus, histogram, peaking | **not tested** | Requires a device with manual Camera2 support |
-| RAW/DNG, HDR+, super-resolution, night mode, dual video | **not implemented** | — |
+| Manual ISO/shutter/WB/focus, peaking | **not tested** | Requires a device with manual Camera2 support |
+| Luminance histogram + exposure advice | `passed` on device (`GuidesAndHdrTest`): the overlay reports its grid/level/histogram state and the histogram produces a live exposure reading from the graded frame | Colour accuracy of the advice on real scenes |
+| Composition grids (thirds, golden, cross), title-safe frame, horizon level | `passed`: grid/level state is asserted on device; the level indicator is sensor-driven and preview-only | How the level feels in the hand on a real device |
+| HDR bracket (3/5/7 frames) fused on device | `passed` where the emulator sensor exposes AE compensation: a bracketed capture produces a decodable JPEG; the test skips (JUnit assume) on sensors without compensation | Real-scene ghosting between bracketed frames |
+| RAW/DNG, sensor HDR, super-resolution, night mode, dual video | **not implemented** | Multi-frame fusion is *display-referred* HDR, not sensor HDR |
 | Signed release APK v1–v4, permanent download link | **not done**: no release published yet | Needs the keystore and a published release |
 
 The emulator proves lifecycle, permissions, capture, encoding and the colour pipeline's

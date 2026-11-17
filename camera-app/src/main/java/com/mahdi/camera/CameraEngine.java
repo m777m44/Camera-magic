@@ -51,6 +51,8 @@ public final class CameraEngine {
         void photo(Uri uri, String error);
         /** The GPU look path is active (false after a fallback to the plain preview). */
         void lookActive(boolean active, String reason);
+        /** Progress of a multi-frame capture: 0..total frames done, with a short label. */
+        default void captureProgress(int done, int total, String label) { }
     }
 
     static final class Lens {
@@ -200,6 +202,11 @@ public final class CameraEngine {
     private boolean lookSessionSeen;
     private long leaseDeadline;
     private int previewRetries;
+    /** Requested HDR bracket; {@code null} when a photo is a single frame. */
+    private volatile BracketPlan bracket = null;
+    private int bracketIndex;
+    private final java.util.List<byte[]> bracketJpegs = new ArrayList<>();
+    private String bracketError = "";
 
     CameraEngine(Context context, Listener listener, GlPipeline lookPipeline) {
         this.context = context.getApplicationContext(); this.listener = listener;
@@ -691,6 +698,13 @@ public final class CameraEngine {
                 photoFailed("Wait for the camera preview before taking a photo.");
                 return;
             }
+            BracketPlan plan = bracket;
+            // Bracketing needs real exposure compensation and a sensor still; the GPU readback
+            // path cannot deliver several exposures, so it is not used for an HDR set.
+            if (plan != null && !lookRendering && supportsCompensation()) {
+                captureBracket(plan);
+                return;
+            }
             if (lookRendering && gl != null && gl.isUsable() && gl.hasFrame()) {
                 busy = true;
                 final Bitmap[] frame = new Bitmap[1];
@@ -812,6 +826,254 @@ public final class CameraEngine {
             closeStillReader();
             if (active && camera != null) createPreview();
         }
+    }
+
+    /** Whether this sensor can apply the exposure compensation a bracket needs. */
+    private boolean supportsCompensation() {
+        if (caps == null || caps.compensation == null) return false;
+        if (caps.compensation.getLower().equals(caps.compensation.getUpper())) return false;
+        // Manual exposure pins ISO and shutter, so compensation has nowhere to go.
+        return !controls.manualExposure;
+    }
+
+    /** Turn the bracket on (a plan) or off ({@code null}). Applies to the next photo. */
+    void setBracket(BracketPlan plan) {
+        bracket = plan;
+    }
+
+    /** Whether the next photo will be a fused HDR set on this device. */
+    boolean bracketActive() {
+        return bracket != null && supportsCompensation() && !lookRendering;
+    }
+
+    /**
+     * Capture every exposure of the bracket, then fuse them into one JPEG.
+     *
+     * <p>Each frame is a normal sensor still with {@code CONTROL_AE_EXPOSURE_COMPENSATION}
+     * set from the plan. The frames are captured smallest-|EV|-first (see {@link BracketPlan}),
+     * so aborting mid-sequence still leaves a usable normally-exposed frame. Fusion runs on the
+     * camera thread; if it fails or the frames disagree about size, the middle exposure is
+     * saved instead of inventing a result.
+     */
+    private void captureBracket(BracketPlan plan) {
+        if (stillReader != null) { photoFailed("A photo is already being taken."); return; }
+        bracketJpegs.clear();
+        bracketIndex = 0;
+        bracketError = "";
+        busy = true;
+        main.post(() -> listener.captureProgress(0, plan.frames, plan.label));
+        captureBracketFrame(plan);
+    }
+
+    private void captureBracketFrame(BracketPlan plan) {
+        if (bracketIndex >= plan.frames) {
+            finishBracket(plan);
+            return;
+        }
+        final int index = bracketIndex;
+        final float ev = plan.compensations[index];
+        final Size size = stillSize();
+        try {
+            stillReader = ImageReader.newInstance(size.getWidth(), size.getHeight(),
+                    android.graphics.ImageFormat.JPEG, 2);
+        } catch (RuntimeException error) {
+            abortBracket("This camera cannot take a bracketed still: " + error.getMessage());
+            return;
+        }
+        stillReader.setOnImageAvailableListener(reader -> {
+            android.media.Image image = null;
+            try {
+                image = reader.acquireNextImage();
+                if (image == null) return;
+                java.nio.ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+                byte[] jpeg = new byte[buffer.remaining()];
+                buffer.get(jpeg);
+                closeStillReader();
+                bracketJpegs.add(jpeg);
+                bracketIndex++;
+                main.post(() -> listener.captureProgress(bracketIndex, plan.frames,
+                        "frame " + bracketIndex + " of " + plan.frames));
+            } catch (RuntimeException error) {
+                closeStillReader();
+                abortBracket("Bracket frame failed: " + error.getMessage());
+                return;
+            } finally {
+                if (image != null) image.close();
+            }
+            if (bracketError.isEmpty()) captureBracketFrame(plan);
+        }, worker);
+        try {
+            closeSession();
+            final int serial = ++sessionSerial;
+            List<Surface> targets = new ArrayList<>();
+            targets.add(lookRendering ? lookInputSurface : previewSurface);
+            if (lookRendering) targets.add(previewSurface);
+            targets.add(stillReader.getSurface());
+            configureSession(new CameraCaptureSession.StateCallback() {
+                @Override public void onConfigured(CameraCaptureSession configured) {
+                    if (!active || camera == null || serial != sessionSerial) { configured.close(); return; }
+                    session = configured;
+                    try {
+                        repeat(false);
+                        CaptureRequest.Builder request = camera.createCaptureRequest(
+                                CameraDevice.TEMPLATE_STILL_CAPTURE);
+                        request.addTarget(stillReader.getSurface());
+                        request.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
+                        request.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION,
+                                compensationStep(ev));
+                        request.set(CaptureRequest.JPEG_ORIENTATION,
+                                CameraMath.rotation(caps.sensorOrientation, displayDegrees, caps.front));
+                        request.set(CaptureRequest.JPEG_QUALITY, (byte) 95);
+                        // A tiny delay between frames lets AE settle before each exposure.
+                        if (plan.intervalMs > 0) {
+                            worker.postDelayed(() -> {
+                                try {
+                                    if (serial != sessionSerial || stillReader == null) return;
+                                    configured.capture(request.build(), new CameraCaptureSession.CaptureCallback() {
+                                        @Override public void onCaptureFailed(CameraCaptureSession failed,
+                                                                              CaptureRequest failedRequest,
+                                                                              android.hardware.camera2.CaptureFailure failure) {
+                                            abortBracket("The camera rejected bracket frame "
+                                                    + (index + 1) + ".");
+                                        }
+                                    }, worker);
+                                } catch (CameraAccessException | RuntimeException error) {
+                                    abortBracket("Bracket capture failed: " + error.getMessage());
+                                }
+                            }, plan.intervalMs);
+                        } else {
+                            configured.capture(request.build(), new CameraCaptureSession.CaptureCallback() {
+                                @Override public void onCaptureFailed(CameraCaptureSession failed,
+                                                                      CaptureRequest failedRequest,
+                                                                      android.hardware.camera2.CaptureFailure failure) {
+                                    abortBracket("The camera rejected bracket frame " + (index + 1) + ".");
+                                }
+                            }, worker);
+                        }
+                    } catch (CameraAccessException | RuntimeException error) {
+                        abortBracket("Bracket capture failed: " + error.getMessage());
+                    }
+                }
+                @Override public void onConfigureFailed(CameraCaptureSession configured) {
+                    configured.close();
+                    if (serial != sessionSerial) return;
+                    abortBracket("This camera cannot combine the preview with bracketed stills.");
+                }
+            }, targets, Arrays.asList(stillReader.getSurface()), false);
+        } catch (RuntimeException error) {
+            abortBracket("Bracket capture failed: " + error.getMessage());
+        }
+    }
+
+    /** Map an EV float onto the sensor's own integer compensation steps. */
+    private int compensationStep(float ev) {
+        android.util.Rational raw = caps.info.get(
+                CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP);
+        float stepValue = raw == null ? 1f : raw.floatValue();
+        float steps = ev / Math.max(1e-3f, stepValue);
+        int clamped = CameraMath.clamp(Math.round(steps),
+                caps.compensation.getLower(), caps.compensation.getUpper());
+        return clamped;
+    }
+
+    /**
+     * Fuse the collected frames and save one JPEG. Falls back to the middle exposure when the
+     * merge cannot produce a better frame, so a photo is never lost to an ambitious feature.
+     */
+    private void finishBracket(BracketPlan plan) {
+        java.util.List<byte[]> frames = new ArrayList<>(bracketJpegs);
+        bracketJpegs.clear();
+        byte[] fallback = frames.isEmpty() ? null : frames.get(frames.size() - 1);
+        byte[] merged = null;
+        try {
+            merged = mergeFrames(plan, frames);
+        } catch (OutOfMemoryError | RuntimeException error) {
+            Log.w(TAG, "HDR merge skipped: " + error.getMessage());
+        }
+        byte[] toSave = merged != null ? merged : fallback;
+        if (toSave == null) {
+            abortBracket("No frame was captured.");
+            return;
+        }
+        try {
+            // The look still has to match the preview, so grade the fused frame on the CPU.
+            com.mahdi.camera.lut.LookGrade grade = gl == null ? null : gl.stillGrade();
+            if (grade != null) {
+                byte[] graded = gradeJpeg(toSave, grade);
+                if (graded != null) toSave = graded;
+            }
+            Uri uri = PhotoStore.saveJpegBytes(context, toSave);
+            busy = false;
+            if (active && camera != null) createPreview();
+            final boolean fused = merged != null;
+            main.post(() -> listener.photo(uri, null));
+            main.post(() -> listener.captureProgress(plan.frames, plan.frames,
+                    fused ? "HDR fused" : "saved the middle exposure"));
+        } catch (IOException | RuntimeException error) {
+            busy = false;
+            if (active && camera != null) createPreview();
+            photoFailed("Could not save the HDR photo: " + error.getMessage());
+        }
+    }
+
+    /**
+     * Decode, scale, fuse and re-encode. Frames are decoded one at a time and scaled to a
+     * shared working size, so a 12 MP bracket does not hold four full bitmaps in memory.
+     */
+    private byte[] mergeFrames(BracketPlan plan, java.util.List<byte[]> jpegs) {
+        if (jpegs.size() < 2) return null;
+        boolean sized = false;
+        int width = 0;
+        int height = 0;
+        java.util.List<int[]> frames = new ArrayList<>();
+        for (byte[] jpeg : jpegs) {
+            Bitmap decoded = android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
+            if (decoded == null) return null;
+            try {
+                if (!sized) {
+                    // A working size of at most ~4 MP keeps the merge inside a normal heap.
+                    float scale = Math.min(1f, (float) Math.sqrt(4_000_000.0
+                            / ((double) decoded.getWidth() * decoded.getHeight())));
+                    width = Math.max(1, Math.round(decoded.getWidth() * scale));
+                    height = Math.max(1, Math.round(decoded.getHeight() * scale));
+                    sized = true;
+                }
+                Bitmap scaled = decoded;
+                if (decoded.getWidth() != width || decoded.getHeight() != height) {
+                    scaled = Bitmap.createScaledBitmap(decoded, width, height, true);
+                }
+                int[] buffer = new int[width * height];
+                scaled.getPixels(buffer, 0, width, 0, 0, width, height);
+                if (scaled != decoded) scaled.recycle();
+                frames.add(buffer);
+            } finally {
+                decoded.recycle();
+            }
+        }
+        if (frames.size() < 2) return null;
+        float[] evs = new float[frames.size()];
+        for (int index = 0; index < evs.length; index++) {
+            evs[index] = index < plan.frames ? plan.compensations[index] : 0f;
+        }
+        int[] fused = HdrMerge.fuse(frames.toArray(new int[0][]), evs);
+        if (fused == null) return null;
+        Bitmap result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        try {
+            result.setPixels(fused, 0, width, 0, 0, width, height);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            if (!result.compress(Bitmap.CompressFormat.JPEG, 95, out)) return null;
+            return out.toByteArray();
+        } finally {
+            result.recycle();
+        }
+    }
+
+    private void abortBracket(String message) {
+        bracketJpegs.clear();
+        closeStillReader();
+        busy = false;
+        if (active && camera != null) createPreview();
+        photoFailed(message);
     }
 
     private void photoFailed(String message) {
