@@ -75,7 +75,7 @@ public class GuidesAndHdrTest {
         }
     }
 
-    @Test public void hdrBracketSavesARealDecodableJpeg() {
+    @Test public void hdrBracketSavesARealDecodableJpeg() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         Uri saved = null;
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
@@ -101,10 +101,11 @@ public class GuidesAndHdrTest {
                 SystemClock.sleep(200);
             }
             assertNotNull("HDR photo was saved", saved);
-            java.io.InputStream input = context.getContentResolver().openInputStream(saved);
-            assertNotNull("the saved photo is readable", input);
-            Bitmap decoded = android.graphics.BitmapFactory.decodeStream(input);
-            input.close();
+            Bitmap decoded;
+            try (java.io.InputStream input = context.getContentResolver().openInputStream(saved)) {
+                assertNotNull("the saved photo is readable", input);
+                decoded = android.graphics.BitmapFactory.decodeStream(input);
+            }
             assertNotNull("fused JPEG decodes", decoded);
             assertTrue(decoded.getWidth() >= 320);
             decoded.recycle();
