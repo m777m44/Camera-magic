@@ -887,6 +887,7 @@ public final class MainActivity extends Activity
     }
 
     private volatile boolean histogramBusy;
+    private volatile String measuredAdvice = "";
 
     private final Runnable histogramLoop = new Runnable() {
         @Override public void run() {
@@ -896,22 +897,34 @@ public final class MainActivity extends Activity
         }
     };
 
+    /**
+     * Measure the frame the user is looking at: the graded GPU frame when that path is alive,
+     * otherwise the plain preview texture. Both are the real preview, so the reading stays
+     * honest on devices where the look pipeline cannot present.
+     */
     private void sampleHistogram() {
         if (histogramBusy) return; // a slow readback must not queue up threads
-        if (histogram == null || gl == null || !gl.isUsable() || !gl.hasFrame()) {
+        if (histogram == null || preview == null || isFinishing()) return;
+        histogramBusy = true;
+        if (gl != null && gl.isUsable() && gl.hasFrame()) {
+            final Bitmap[] frame = new Bitmap[1];
+            Thread reader = new Thread(() -> {
+                frame[0] = gl.captureFrame();
+                handler.post(() -> {
+                    histogramBusy = false;
+                    measureHistogram(frame[0]);
+                });
+            }, "MahdiHistogram");
+            reader.start();
+            return;
+        }
+        Bitmap plain = preview.getBitmap();
+        histogramBusy = false;
+        if (plain == null) {
             if (exposureInfo != null && histogramOn) exposureInfo.setText("waiting for frame…");
             return;
         }
-        histogramBusy = true;
-        final Bitmap[] frame = new Bitmap[1];
-        Thread reader = new Thread(() -> {
-            frame[0] = gl.captureFrame();
-            handler.post(() -> {
-                histogramBusy = false;
-                measureHistogram(frame[0]);
-            });
-        }, "MahdiHistogram");
-        reader.start();
+        measureHistogram(plain);
     }
 
     private void measureHistogram(Bitmap frame) {
@@ -925,7 +938,11 @@ public final class MainActivity extends Activity
                 small.getPixels(pixels, 0, width, 0, 0, width, height);
                 Histogram measurement = Histogram.of(pixels, 1);
                 histogram.sample(measurement);
-                if (exposureInfo != null && histogramOn) exposureInfo.setText(measurement.advice());
+                if (exposureInfo != null && histogramOn) {
+                    exposureInfo.setText(measurement.advice());
+                    exposureInfo.setContentDescription(measurement.advice());
+                }
+                measuredAdvice = measurement.advice();
             } finally {
                 if (small != frame) small.recycle();
             }
@@ -1332,7 +1349,13 @@ public final class MainActivity extends Activity
     }
 
     String histogramAdviceForTest() {
+        if (measuredAdvice != null && !measuredAdvice.isEmpty()) return measuredAdvice;
         return histogram == null ? "" : histogram.advice();
+    }
+
+    /** Drive one measurement synchronously-ish, so tests do not have to wait for the loop. */
+    void sampleHistogramForTest() {
+        sampleHistogram();
     }
 
     void bracketForTest(BracketPlan plan) {

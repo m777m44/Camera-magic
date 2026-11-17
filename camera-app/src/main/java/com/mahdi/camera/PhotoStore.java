@@ -84,6 +84,25 @@ final class PhotoStore {
         }
     }
 
+    /**
+     * Delete a still this app just wrote, whether it is a MediaStore uri or a legacy
+     * {@code file://} uri. MediaStore.release/delete cannot take a file uri, which is exactly
+     * what API 23–28 returns from the legacy path.
+     */
+    static void delete(Context context, Uri uri) {
+        if (uri == null) return;
+        try {
+            if ("file".equals(uri.getScheme())) {
+                File file = new File(uri.getPath() == null ? "" : uri.getPath());
+                if (file.exists() && !file.delete()) file.deleteOnExit();
+                return;
+            }
+            context.getContentResolver().delete(uri, null, null);
+        } catch (RuntimeException ignored) {
+            // Deletion is housekeeping for tests; the photo itself is already gone or kept.
+        }
+    }
+
     static Uri saveJpeg(Context context, Bitmap bitmap, int unusedOrientation) throws IOException {
         if (bitmap == null || bitmap.isRecycled()) throw new IOException("No photo to save");
         String name = "Mahdi_" + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US)

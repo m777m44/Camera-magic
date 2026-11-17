@@ -61,15 +61,22 @@ public class GuidesAndHdrTest {
             assertTrue("golden grid reported: " + state.get(), state.get().contains("grid=golden"));
             assertTrue("level reported: " + state.get(), state.get().contains("level=on"));
             assertTrue("histogram reported: " + state.get(), state.get().contains("histo=on"));
-            // The histogram samples the graded frame about every 400 ms; give it a moment.
+            // The histogram samples the presented frame every ~400 ms, and the test also drives
+            // one sample directly so a slow software-GL emulator cannot make this flaky.
             AtomicReference<String> advice = new AtomicReference<>("");
-            long deadline = SystemClock.elapsedRealtime() + 15000;
+            long deadline = SystemClock.elapsedRealtime() + 20000;
             while (SystemClock.elapsedRealtime() < deadline) {
-                scenario.onActivity(activity -> advice.set(activity.histogramAdviceForTest()));
+                scenario.onActivity(activity -> {
+                    activity.sampleHistogramForTest();
+                    advice.set(activity.histogramAdviceForTest());
+                });
                 if (!advice.get().isEmpty()) break;
-                SystemClock.sleep(200);
+                SystemClock.sleep(250);
             }
             assertFalse("histogram produced an exposure reading", advice.get().isEmpty());
+            assertTrue("reading names a real measurement: " + advice.get(),
+                    advice.get().contains("%") || advice.get().contains("exposed")
+                            || advice.get().contains("clipped") || advice.get().contains("Balanced"));
             assertNotNull("real screenshot of the overlays",
                     InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot());
         }
@@ -110,7 +117,7 @@ public class GuidesAndHdrTest {
             assertTrue(decoded.getWidth() >= 320);
             decoded.recycle();
         } finally {
-            if (saved != null) context.getContentResolver().delete(saved, null, null);
+            PhotoStore.delete(context, saved);
         }
     }
 }
