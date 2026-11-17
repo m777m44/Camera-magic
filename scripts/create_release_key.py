@@ -33,23 +33,22 @@ import hashlib
 import os
 import struct
 import sys
+from pathlib import Path
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.x509.oid import NameOID
 
 JKS_MAGIC = 0xFEEDFEED
 JKS_VERSION = 2
 KEY_ALIAS = "mahdi"
-KEY_DIGEST = 20
-IV_LENGTH = 8
+FULL_DIGEST = 20  # SHA-1 length, used for both the key check and the store digest
+SALT_LENGTH = 20  # JKS stores 20 random salt bytes in front of the enciphered key
+KEY_PROTECTOR_OID = "1.3.6.1.4.1.42.2.17.1.1"  # JavaSoft proprietary key protection
 KEY_ALGORITHM = "1.2.840.113549.1.1.1"  # rsaEncryption
-KEY_PROTECTOR_OID = "1.3.6.1.4.1.42.2.17.1.1"
 SIGNATURE_ALGORITHM = "1.2.840.113549.1.1.11"  # sha256WithRSAEncryption
 VALIDITY_DAYS = 10_000
-JKS_SALT = b"\x0b\x0f\x0d\x0a\x0c\x0e\x09\x08"  # the fixed salt used by JKS KeyProtector
 
 
 class KeyError_(Exception):
@@ -67,47 +66,139 @@ def password_from_env(name: str) -> str:
 
 
 def jks_utf(alias: str) -> bytes:
-    """The alias encoding used by JKS: UTF-16 code units, big-endian, length-prefixed."""
-    encoded = alias.encode("utf-16-be")
+    """
+    The alias encoding used by JKS: ``DataOutputStream.writeUTF``, i.e. a 2-byte length and
+    then modified UTF-8. For the ASCII aliases this app uses it is plain UTF-8.
+
+    The *password* hashing is the opposite (UTF-16BE chars) — mixing the two encodings is what
+    makes a hand-written keystore unreadable to keytool and apksigner.
+    """
+    encoded = alias.encode("utf-8")
+    if len(encoded) > 0xFFFF:
+        raise KeyError_("the key alias is too long for the JKS format")
     return struct.pack(">H", len(encoded)) + encoded
 
 
-def key_protector_keystream(length: int) -> bytes:
-    """JKS encrypts the private key with SHA-1(password) XOR an AES-ECB keystream."""
-    digest = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07] + [0] * 12
-    cipher = Cipher(algorithms.AES(bytes(16)), modes.ECB())
-    encryptor = cipher.encryptor()
-    out = bytearray()
-    while len(out) < length:
-        digest = list(encryptor.update(bytes(digest)))
-        out.extend(digest)
-    return bytes(out[:length])
+def key_protector_keystream(password: str, salt: bytes, length: int) -> bytes:
+    """
+    Reproduce ``sun.security.provider.KeyProtector`` (the Sun JKS key-protection algorithm).
+
+    The keystream is ``SHA1(password || salt)``, then ``SHA1(password || previous)`` and so on,
+    where ``password`` is the Java char sequence as UTF-16BE. Salt is 20 random bytes stored in
+    front of the ciphertext. Note this is *not* PBES1/AES: several "JKS in Python" snippets get
+    this wrong and produce a keystore that keytool rejects.
+    """
+    password_bytes = password.encode("utf-16-be")
+    current = salt
+    stream = bytearray()
+    while len(stream) < length:
+        current = hashlib.sha1(password_bytes + current).digest()
+        stream.extend(current)
+    return bytes(stream[:length])
 
 
 def protect_private_key(pkcs8: bytes, password: str) -> bytes:
-    """Return the JKS enciphered key blob: IV || ciphertext || SHA-1(password+plain)."""
-    password_bytes = password.encode("utf-16-be")  # JKS uses chars, i.e. UTF-16BE
-    # JKS derives the keystream seed from SHA-1(salt || password), but the implementation
-    # below seeds AES with the fixed 16-byte digest state, so the salt only documents the
-    # format. Keeping it explicit prevents a future edit from "fixing" it incompatibly.
-    _ = hashlib.sha1(JKS_SALT + password_bytes).digest()
-    iv = os.urandom(IV_LENGTH)
-    keystream = key_protector_keystream(len(pkcs8))
+    """
+    Encrypt the PKCS#8 key and wrap it the way JKS stores it.
+
+    The stored blob is a DER ``EncryptedPrivateKeyInfo`` whose algorithm is the Sun
+    ``JAVAsoft proprietary key-protection`` OID and whose contents are
+    ``salt || XOR(plaintext, keystream) || SHA1(password || plaintext)``.
+    """
+    password_bytes = password.encode("utf-16-be")
+    salt = os.urandom(SALT_LENGTH)
+    keystream = key_protector_keystream(password, salt, len(pkcs8))
     ciphertext = bytes(a ^ b for a, b in zip(pkcs8, keystream, strict=True))
-    check = hashlib.sha1(password_bytes + pkcs8).digest()[:KEY_DIGEST]
-    return iv + ciphertext + check
+    check = hashlib.sha1(password_bytes + pkcs8).digest()
+    encrypted = salt + ciphertext + check
+    return der_sequence(
+        der_sequence(der_oid(KEY_PROTECTOR_OID) + der_null()) + der_octets(encrypted)
+    )
 
 
 def unprotected_private_key(blob: bytes, password: str) -> bytes:
-    """Inverse of :func:`protect_private_key`, used by the self-test."""
+    """Inverse of :func:`protect_private_key`; used by the self-test and the reader."""
+    oid, payload = read_encrypted_private_key_info(blob)
+    if oid != KEY_PROTECTOR_OID:
+        raise KeyError_(f"unexpected key-protection algorithm {oid}; only the JKS one is written")
     password_bytes = password.encode("utf-16-be")
-    iv, ciphertext, check = blob[:IV_LENGTH], blob[IV_LENGTH:-KEY_DIGEST], blob[-KEY_DIGEST:]
-    del iv
-    keystream = key_protector_keystream(len(ciphertext))
+    salt = payload[:SALT_LENGTH]
+    ciphertext = payload[SALT_LENGTH:-FULL_DIGEST]
+    check = payload[-FULL_DIGEST:]
+    keystream = key_protector_keystream(password, salt, len(ciphertext))
     plain = bytes(a ^ b for a, b in zip(ciphertext, keystream, strict=True))
-    if hashlib.sha1(password_bytes + plain).digest()[:KEY_DIGEST] != check:
+    if hashlib.sha1(password_bytes + plain).digest() != check:
         raise KeyError_("The keystore password does not match the stored key.")
     return plain
+
+
+# --- minimal DER, just enough for EncryptedPrivateKeyInfo -------------------------------
+
+
+def der_length(length: int) -> bytes:
+    if length < 0x80:
+        return bytes([length])
+    encoded = length.to_bytes((length.bit_length() + 7) // 8, "big")
+    return bytes([0x80 | len(encoded)]) + encoded
+
+
+def der_sequence(content: bytes) -> bytes:
+    return b"\x30" + der_length(len(content)) + content
+
+
+def der_octets(content: bytes) -> bytes:
+    return b"\x04" + der_length(len(content)) + content
+
+
+def der_oid(dotted: str) -> bytes:
+    parts = [int(part) for part in dotted.split(".")]
+    body = bytearray([parts[0] * 40 + parts[1]])
+    for value in parts[2:]:
+        chunk = bytearray([value & 0x7F])
+        value >>= 7
+        while value:
+            chunk.insert(0, 0x80 | (value & 0x7F))
+            value >>= 7
+        body.extend(chunk)
+    return b"\x06" + der_length(len(body)) + bytes(body)
+
+
+def der_null() -> bytes:
+    return b"\x05\x00"
+
+
+def _der_read(data: bytes, position: int, tag: int) -> tuple:
+    """Read one TLV of the expected tag; returns (content, next position)."""
+    if position >= len(data) or data[position] != tag:
+        raise KeyError_(f"expected DER tag {tag:#x} at offset {position}")
+    position += 1
+    if position >= len(data):
+        raise KeyError_("truncated DER length")
+    first = data[position]
+    position += 1
+    if first & 0x80:
+        count = first & 0x7F
+        length = int.from_bytes(data[position : position + count], "big")
+        position += count
+    else:
+        length = first
+    return data[position : position + length], position + length
+
+
+def read_encrypted_private_key_info(der: bytes) -> tuple:
+    """Return (algorithm OID, encrypted payload) from a DER EncryptedPrivateKeyInfo."""
+    body, _ = _der_read(der, 0, 0x30)
+    algorithm, position = _der_read(body, 0, 0x30)
+    oid_raw, _ = _der_read(algorithm, 0, 0x06)
+    parts = [oid_raw[0] // 40, oid_raw[0] % 40]
+    value = 0
+    for byte in oid_raw[1:]:
+        value = (value << 7) | (byte & 0x7F)
+        if not byte & 0x80:
+            parts.append(value)
+            value = 0
+    payload, _ = _der_read(body, position, 0x04)
+    return ".".join(str(part) for part in parts), payload
 
 
 def build_certificate(key: rsa.RSAPrivateKey, common_name: str) -> x509.Certificate:
@@ -132,6 +223,84 @@ def build_certificate(key: rsa.RSAPrivateKey, common_name: str) -> x509.Certific
     )
 
 
+def write_chain_entry(der: bytes) -> bytes:
+    """
+    One certificate *inside a private-key entry*: just the type and the DER.
+
+    A private-key entry's chain is not a list of top-level entries: each member is
+    ``writeUTF(type)`` then ``writeInt(len) + DER``, with no tag, alias or timestamp. A
+    top-level trusted certificate (which this store does not need) does carry those fields.
+    """
+    cert_type = b"X.509"
+    return struct.pack(">H", len(cert_type)) + cert_type + struct.pack(">I", len(der)) + der
+
+
+def read_back(path: str, password: str) -> dict:
+    """
+    Parse the file we just wrote, the way keytool would, and return what it says.
+
+    This is deliberately a second implementation: the writer walks forward, the reader walks
+    the byte stream looking for the digest at the end. A store that round-trips through both
+    is not merely "written", it is readable.
+    """
+    data = open(path, "rb").read()
+    magic, version, count = struct.unpack(">III", data[:12])
+    if magic != JKS_MAGIC or version != JKS_VERSION:
+        raise KeyError_(f"bad JKS header: magic {magic:#x} version {version}")
+    if (
+        data[-FULL_DIGEST:]
+        != hashlib.sha1(
+            password.encode("utf-16-be") + b"Mighty Aphrodite" + data[:-FULL_DIGEST]
+        ).digest()
+    ):
+        raise KeyError_("the store's SHA-1 digest does not verify (wrong password or corrupt file)")
+    position = 12
+    result = {"alias": None, "certificates": 0, "key_matches_certificate": False, "der": b""}
+    for _ in range(count):
+        tag = struct.unpack(">I", data[position : position + 4])[0]
+        position += 4
+        alias_length = struct.unpack(">H", data[position : position + 2])[0]
+        position += 2
+        alias = data[position : position + alias_length].decode("utf-8")
+        position += alias_length
+        position += 8  # timestamp (8 bytes in JKS v2)
+        if tag != 1:
+            raise KeyError_(f"unexpected entry tag {tag}; expected a private key entry")
+        key_length = struct.unpack(">I", data[position : position + 4])[0]
+        position += 4
+        blob = data[position : position + key_length]
+        position += key_length
+        chain_length = struct.unpack(">I", data[position : position + 4])[0]
+        position += 4
+        certificates = []
+        for _ in range(chain_length):
+            type_length = struct.unpack(">H", data[position : position + 2])[0]
+            position += 2
+            kind = data[position : position + type_length].decode("ascii")
+            position += type_length
+            if kind != "X.509":
+                raise KeyError_(f"unsupported certificate type {kind!r}")
+            der_length = struct.unpack(">I", data[position : position + 4])[0]
+            position += 4
+            certificates.append(data[position : position + der_length])
+            position += der_length
+        result["alias"] = alias
+        result["certificates"] = len(certificates)
+        result["der"] = certificates[0] if certificates else b""
+        private_key = serialization.load_der_private_key(
+            unprotected_private_key(blob, password), password=None
+        )
+        leaf = x509.load_der_x509_certificate(result["der"])
+        result["key_matches_certificate"] = (
+            leaf.public_key().public_numbers().n == private_key.private_numbers().public_numbers.n
+        )
+    if position != len(data) - FULL_DIGEST:
+        raise KeyError_(
+            f"trailing bytes: entries end at {position}, digest starts at {len(data) - FULL_DIGEST}"
+        )
+    return result
+
+
 def write_jks(path, alias: str, key, certificate: x509.Certificate, password: str) -> None:
     pkcs8 = key.private_bytes(
         encoding=serialization.Encoding.DER,
@@ -140,22 +309,16 @@ def write_jks(path, alias: str, key, certificate: x509.Certificate, password: st
     )
     protected = protect_private_key(pkcs8, password)
     chain = certificate.public_bytes(serialization.Encoding.DER)
-    alias_bytes = jks_utf(alias)
-
+    now = int(dt.datetime.now().timestamp() * 1000)
     out = bytearray()
     out += struct.pack(">II", JKS_MAGIC, JKS_VERSION)
-    out += struct.pack(">I", 1)  # one private key entry
-    out += struct.pack(">I", 2)  # tag: private key
-    out += alias_bytes
-    out += struct.pack(">Q", int(dt.datetime.now().timestamp() * 1000))
+    out += struct.pack(">I", 1)  # one entry in total
+    out += struct.pack(">I", 1)  # tag: private key entry (2 is a trusted certificate)
+    out += jks_utf(alias)  # alias: 2-byte length + modified UTF-8
+    out += struct.pack(">Q", now)  # 8-byte timestamp in JKS v2, not 4
     out += struct.pack(">I", len(protected)) + protected
-    out += struct.pack(">I", 1)  # one certificate in the chain
-    # The certificate entry alias is JKS UTF-8 (modified UTF-8), not the UTF-16 used above.
-    certificate_alias = (alias + "-certificate").encode("utf-8")
-    out += struct.pack(">I", 2)  # tag: trusted certificate
-    out += struct.pack(">H", len(certificate_alias)) + certificate_alias
-    out += struct.pack(">Q", int(dt.datetime.now().timestamp() * 1000))
-    out += struct.pack(">I", len(chain)) + chain
+    out += struct.pack(">I", 1)  # number of certificates in the chain
+    out += write_chain_entry(chain)
     digest = hashlib.sha1(password.encode("utf-16-be") + b"Mighty Aphrodite" + out).digest()
     out += digest
 
@@ -163,6 +326,50 @@ def write_jks(path, alias: str, key, certificate: x509.Certificate, password: st
     with os.fdopen(descriptor, "wb") as target:
         target.write(bytes(out))
     os.chmod(path, 0o600)
+
+
+def save_pin(config_path: str, pin: str, valid_until: str) -> None:
+    """
+    Keep the published certificate pin in sync with the key that was just created.
+
+    A stale pin is not a cosmetic problem: the publisher compares the APK's signer against
+    this value, so a drift means the signed release would be refused by this repo's own check.
+    """
+    import json
+
+    target = Path(config_path)
+    if not target.is_file():
+        return
+    data = json.loads(target.read_text(encoding="utf-8"))
+    data["certificate_sha256"] = pin
+    data["valid_until"] = valid_until
+    target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print(f"updated certificate pin in {target} ({valid_until})")
+
+
+def save_private_settings(path: str, password: str, alias: str, pin: str) -> None:
+    """
+    Write the owner-only companion file ``configure_app_signing.py`` reads.
+
+    It lives beside the keystore under ``keys/`` (git-ignored, mode 0600) and holds the two
+    passwords so the secrets can be pushed to GitHub without retyping them. Losing this file
+    is not fatal — the passwords are the owner's choice and remain known to them.
+    """
+    import json
+
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "alias": alias,
+        "store_password": password,
+        "key_password": password,
+        "certificate_sha256": pin,
+        "note": "Owner-only. Never commit this file; it is the password for the release key.",
+    }
+    descriptor = os.open(target, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, indent=2) + "\n")
+    os.chmod(target, 0o600)
 
 
 def main() -> int:
@@ -173,6 +380,11 @@ def main() -> int:
     parser.add_argument("--bits", type=int, default=3072)
     parser.add_argument(
         "--store-password-env", default="MAHDI_STORE_PASSWORD", help="env var holding the password"
+    )
+    parser.add_argument(
+        "--config",
+        default="config/mahdi-camera-signing.json",
+        help="signing config whose certificate pin is updated to match the new key",
     )
     args = parser.parse_args()
 
@@ -194,6 +406,14 @@ def main() -> int:
         )
         if unprotected_private_key(protect_private_key(pkcs8, password), password) != pkcs8:
             raise KeyError_("The key protector does not round-trip; refusing to write it.")
+        # Read the finished file back before telling anyone it is a keystore.
+        check = read_back(path, password)
+        if check["alias"] != args.alias or check["certificates"] != 1:
+            raise KeyError_(f"the written store does not read back correctly: {check['alias']!r}")
+        if not check["key_matches_certificate"]:
+            raise KeyError_("the stored private key does not match its certificate")
+        if check["der"] != certificate.public_bytes(serialization.Encoding.DER):
+            raise KeyError_("the stored certificate is not the one that was signed")
         probe = os.urandom(32)
         certificate.public_key().verify(
             key.sign(
@@ -209,13 +429,20 @@ def main() -> int:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
-    der = certificate.public_bytes(serialization.Encoding.DER)
+    der = check["der"]
     pin = hashlib.sha256(der).hexdigest()
+    save_pin(args.config, pin, certificate.not_valid_after_utc.date().isoformat())
+    save_private_settings(
+        str(Path(path).with_name("mahdi-camera-private.json")), password, args.alias, pin
+    )
     print(f"keystore: {path} (0600, alias {args.alias}, RSA {args.bits})")
     print(f"certificate subject: {certificate.subject.rfc4514_string()}")
     print(f"valid until: {certificate.not_valid_after_utc:%Y-%m-%d}")
     print(f"certificate sha256: {pin}")
     print(f"keystore base64: {base64.b64encode(open(path, 'rb').read()).decode('ascii')[:40]}...")
+    print()
+    print("Owner-only settings: keys/mahdi-camera-private.json (0600, git-ignored)")
+    print("Next: python3 scripts/configure_app_signing.py  (pushes the three GitHub secrets)")
     print()
     print("Back up the keystore and the password together; losing either makes app updates")
     print("impossible for anyone who installed this certificate.")

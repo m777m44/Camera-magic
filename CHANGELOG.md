@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — a genuinely readable JKS keystore, and one-command secret install
+
+- **The keystore writer was fixed against the real format.** A previously generated store was
+  rejected by independent readers, so `apksigner` would have refused it at release time. The
+  writer now follows OpenJDK `JavaKeyStore`/`KeyProtector` exactly: private-key entry tag **1**
+  (not 2), an 8-byte timestamp, aliases as modified UTF-8, a chain of `type + DER` members with
+  no per-entry tag, a 20-byte salt, the SHA-1 keystream `SHA1(password || previous)` over UTF-16BE
+  chars, and the key wrapped in a DER `EncryptedPrivateKeyInfo` carrying the Sun OID.
+- **The file is read back before it is announced.** `create_release_key.py` now verifies its own
+  output with a second, independent parser (header, alias, chain, digest, key/cert match), and
+  rewrites `config/mahdi-camera-signing.json` with the new pin so the publisher's own check can
+  never disagree with the key that exists.
+- **`pyjks` cross-check in the tests.** A new test opens the produced store with a completely
+  separate JKS implementation and requires a wrong password to be rejected. It skips cleanly when
+  the optional dependency is absent; CI installs it best-effort.
+- **`scripts/install_release_secrets.py`** installs the three signing secrets from one command
+  (or reports what is missing with `--verify`), piping values through `gh` stdin, refusing
+  world-readable key files and short passwords, and never printing a private value.
+
+
 ## Unreleased — HDR bracket, live histogram, guides and an animated UI
 
 - **HDR bracket capture, fused on the device.** A new `BRACKET` chip captures 3, 5 or 7

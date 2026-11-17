@@ -79,10 +79,52 @@ python3 scripts/create_release_key.py --keystore keys/mahdi-camera-release.jks
 غيابها يجعل الناشر يتوقف دون استبدال التنزيل، لا أن ينشر تطبيقًا بتوقيع debug.
 لا يحتاج التطبيق المستقل `APK_SOURCE_URL` أو `APK_SOURCE_SHA256` أو متغير النشر القديم.
 
-يمكن استعمال `scripts/configure_app_signing.py` من بيئة خاصة تحتوي الملفين والمخول لها
-إدارة Secrets. ينقل القيم إلى gh عبر stdin ولا يطبعها أو يضعها في argv.
-إذا أعادت GitHub خطأ 403، فصلاحيات الاتصال لا تسمح بإعداد الأسرار؛ لا تحاول وضع المفتاح
-في ملف workflow أو متغير عام لتعويض هذا القيد. إعداد المالك في واجهة GitHub هو البديل.
+### أسرع طريقة: أمر واحد
+
+```bash
+python3 scripts/install_release_secrets.py           # يثبّت الأسرار الثلاثة
+python3 scripts/install_release_secrets.py --verify  # يخبرك فقط ما الناقص
+```
+
+يقرأ السكربت `keys/mahdi-camera-release.jks` و`keys/mahdi-camera-private.json` (الملكية
+0600، خارج Git)، يحوّل المخزن إلى base64 مرة واحدة، ويرسل كل قيمة إلى `gh secret set` عبر
+stdin — لا تُطبع ولا تظهر في سطر الأوامر. يرفض المتابعة إذا كانت صلاحيات الملفات مفتوحة أو
+كانت كلمة المرور أقل من 12 حرفًا، ويعيد رمز خروج 2 مع سبب واضح عند الرفض.
+
+### أو يدويًا من واجهة GitHub
+
+Settings → Secrets and variables → Actions → New repository secret، وثلاثة أسرار فقط:
+
+```bash
+base64 -w0 keys/mahdi-camera-release.jks   # ← لصق الناتج في MAHDI_APP_KEYSTORE_B64
+```
+
+| Secret | المحتوى |
+|---|---|
+| `MAHDI_APP_KEYSTORE_B64` | المخزن كاملًا بترميز base64 في سطر واحد، بلا أسطر جديدة |
+| `MAHDI_APP_STORE_PASSWORD` | كلمة مرور المخزن (12 حرفًا على الأقل) |
+| `MAHDI_APP_KEY_PASSWORD` | كلمة مرور المفتاح (12 حرفًا على الأقل) |
+
+`scripts/configure_app_signing.py` يفعل الشيء نفسه لكنه يتطلب ملف الإعدادات صراحةً.
+
+إذا أعادت GitHub خطأ 403، فصلاحيات الاتصال لا تسمح بإعداد الأسرار (تحتاج صلاحية
+**Secrets: write** لمالك المستودع). لا تحاول وضع المفتاح في ملف workflow أو متغير عام
+لتعويض هذا القيد؛ شغّل السكربت من جهازك المسجّل فيه `gh auth login` كمالك.
+
+### بعد إعداد الأسرار
+
+شغّل `Mahdi Camera app validation` ثم `Publish Mahdi Camera APK` (أو ادفع وسمًا)، وتأكد أن:
+
+- `…/releases/latest/download/Mahdi_Camera.apk` يعمل؛
+- البصمة المعروضة في `certificate.txt` تساوي `certificate_sha256` في
+  `config/mahdi-camera-signing.json`؛
+- `preview` ما زال prerelease منفصلًا ولا يحمل الاسم `Mahdi_Camera.apk`.
+
+### تحذير لا يمكن إصلاحه لاحقًا
+
+من يثبّت نسخة موقّعة بهذا المفتاح لن يستقبل تحديثًا موقّعًا بمفتاح آخر. احتفظ بـ
+`keys/mahdi-camera-release.jks` وكلمة مروره معًا في مكانين منفصلين. إذا فُقد المفتاح،
+الحل الوحيد هو اسم حزمة جديد (`applicationId`) وإعادة تثبيت يدوية للمستخدمين.
 
 ## بديل آمن: التوقيع محليًا وتسليم APK العامة فقط
 
