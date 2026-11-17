@@ -202,6 +202,11 @@ public final class CameraEngine {
     private boolean lookSessionSeen;
     private long leaseDeadline;
     private int previewRetries;
+    /** Requested HDR bracket; {@code null} when a photo is a single frame. */
+    private volatile BracketPlan bracket = null;
+    private int bracketIndex;
+    private final java.util.List<byte[]> bracketJpegs = new ArrayList<>();
+    private String bracketError = "";
 
     CameraEngine(Context context, Listener listener, GlPipeline lookPipeline) {
         this.context = context.getApplicationContext(); this.listener = listener;
